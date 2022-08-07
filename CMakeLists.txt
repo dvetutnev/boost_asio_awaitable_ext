@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 
 # Temporary compatibility for Clang 14
 add_compile_options("-std=c++2b")
-#set(CMAKE_CXX_STANDARD 20)
+#set(CMAKE_CXX_STANDARD 23)
 #set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake ${CMAKE_BINARY_DIR})
@@ -31,4 +31,3 @@ target_link_libraries(${PROJECT_NAME} INTERFACE Boost::boost)
 
 enable_testing()
 add_subdirectory(test)
-
