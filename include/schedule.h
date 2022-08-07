@@ -1,7 +1,5 @@
 #pragma once
 
-#include <boost/asio/post.hpp>
-#include <boost/asio/async_result.hpp>
 #include <boost/asio/use_awaitable.hpp>
 
 inline auto schedule(boost::asio::any_io_executor executor) -> boost::asio::awaitable<void>
