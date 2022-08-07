@@ -4,7 +4,7 @@
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/use_awaitable.hpp>
 
-inline auto schedule(boost::asio::any_io_executor executor)
+inline auto schedule(boost::asio::any_io_executor executor) -> boost::asio::awaitable<void>
 {
     auto initiate = [executor]<typename Handler>(Handler&& handler) mutable
     {
