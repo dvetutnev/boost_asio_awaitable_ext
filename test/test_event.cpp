@@ -25,7 +25,7 @@ struct Event
                 std::memory_order_acquire);
 
             if (!isWaiting) {
-            //    this->_handler();
+                this->_handler();
             }
         };
 
@@ -48,7 +48,7 @@ struct Event
 };
 } // Anonymous namespace
 
-TEST(simple_event_asio, _1) {
+TEST(Event, _) {
     bool reachedPointA = false;
     bool reachedPointB = false;
     Event event;
@@ -91,10 +91,12 @@ TEST(simple_event_asio, _1) {
     EXPECT_TRUE(reachedPointB);
 }
 
-TEST(simple_event_asio, _2) {
+TEST(Event, set_before_wait) {
     bool reachedPointA = false;
     bool reachedPointB = false;
     Event event;
+
+    event.set();
 
     auto consumer = [&]() -> boost::asio::awaitable<void> {
         reachedPointA = true;
@@ -107,13 +109,6 @@ TEST(simple_event_asio, _2) {
     };
 
     auto check = [&]() -> boost::asio::awaitable<void> {
-        EXPECT_TRUE(reachedPointA);
-        EXPECT_FALSE(reachedPointB);
-
-        event.set();
-        boost::asio::any_io_executor executor = co_await boost::asio::this_coro::executor;
-        co_await schedule(executor);
-
         EXPECT_TRUE(reachedPointA);
         EXPECT_FALSE(reachedPointB);
         co_return;
