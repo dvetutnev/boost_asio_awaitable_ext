@@ -1,11 +1,12 @@
 add_executable(tests
     test_timer.cpp
     test_schedule.cpp
-    test_event.cpp)
+    test_event.cpp
+    main.cpp)
 
 target_link_libraries(tests
     ${PROJECT_NAME}
-    GTest::gmock_main)
+    Boost::test
+    boost_unit_test_framework)
 
-include(GoogleTest)
-gtest_discover_tests(tests)
+add_test(NAME ${PROJECT_NAME} COMMAND tests)

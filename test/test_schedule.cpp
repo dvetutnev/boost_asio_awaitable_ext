@@ -4,9 +4,10 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 
-#include <gtest/gtest.h>
+#include <boost/test/unit_test.hpp>
 
-TEST(schedule_asio, _) {
+BOOST_AUTO_TEST_CASE(test_schedule)
+{
     bool reachedPointA = false;
     bool reachedPointB = false;
 
@@ -21,21 +22,21 @@ TEST(schedule_asio, _) {
     };
 
     auto check = [&]() -> boost::asio::awaitable<void> {
-            EXPECT_TRUE(reachedPointA);
-            EXPECT_FALSE(reachedPointB);
+            BOOST_TEST(reachedPointA);
+            BOOST_TEST(!reachedPointB);
             co_return;
     };
 
-    auto task = [&]() -> boost::asio::awaitable<void> {
+    auto app = [&]() -> boost::asio::awaitable<void> {
             using namespace boost::asio::experimental::awaitable_operators;
             co_await(process() && check());
             co_return;
     };
 
     boost::asio::io_context ioContext;
-    boost::asio::co_spawn(ioContext, task(), boost::asio::detached);
+    boost::asio::co_spawn(ioContext, app(), boost::asio::detached);
     ioContext.run();
 
-    EXPECT_TRUE(reachedPointA);
-    EXPECT_TRUE(reachedPointB);
+    BOOST_TEST(reachedPointA);
+    BOOST_TEST(reachedPointB);
 }

@@ -2,8 +2,15 @@
 
 #include "boost/asio/use_awaitable.hpp"
 
-struct Event
+class Event
 {
+    enum class State { not_set, not_set_consumer_waiting, set };
+    std::atomic<State> _state;
+    std::move_only_function<void()> _handler;
+
+public:
+    Event() : _state{State::not_set} {}
+
     boost::asio::awaitable<void> wait(boost::asio::any_io_executor executor) {
         auto initiate = [this, executor]<typename Handler>(Handler&& handler) mutable
         {
@@ -35,8 +42,4 @@ struct Event
             _handler();
         }
     }
-
-    enum class State { not_set, not_set_consumer_waiting, set };
-    std::atomic<State> _state = State::not_set;
-    std::move_only_function<void()> _handler;
 };

@@ -5,12 +5,10 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 
-#include <gtest/gtest.h>
+#include <boost/test/unit_test.hpp>
 
-namespace {
-} // Anonymous namespace
-
-TEST(Event, _) {
+BOOST_AUTO_TEST_CASE(test_Event)
+{
     bool reachedPointA = false;
     bool reachedPointB = false;
     Event event;
@@ -26,14 +24,14 @@ TEST(Event, _) {
     };
 
     auto check = [&]() -> boost::asio::awaitable<void> {
-        EXPECT_TRUE(reachedPointA);
-        EXPECT_FALSE(reachedPointB);
+        BOOST_TEST(reachedPointA);
+        BOOST_TEST(!reachedPointB);
 
         boost::asio::any_io_executor executor = co_await boost::asio::this_coro::executor;
         co_await schedule(executor);
 
-        EXPECT_TRUE(reachedPointA);
-        EXPECT_FALSE(reachedPointB);
+        BOOST_TEST(reachedPointA);
+        BOOST_TEST(!reachedPointB);
 
         event.set();
         co_return;
@@ -49,11 +47,12 @@ TEST(Event, _) {
     boost::asio::co_spawn(ioContext, task(), boost::asio::detached);
     ioContext.run();
 
-    EXPECT_TRUE(reachedPointA);
-    EXPECT_TRUE(reachedPointB);
+    BOOST_TEST(reachedPointA);
+    BOOST_TEST(reachedPointB);
 }
 
-TEST(Event, set_before_wait) {
+BOOST_AUTO_TEST_CASE(test_Event_set_before_wait)
+{
     bool reachedPointA = false;
     bool reachedPointB = false;
     Event event;
@@ -71,8 +70,8 @@ TEST(Event, set_before_wait) {
     };
 
     auto check = [&]() -> boost::asio::awaitable<void> {
-        EXPECT_TRUE(reachedPointA);
-        EXPECT_FALSE(reachedPointB);
+        BOOST_TEST(reachedPointA);
+        BOOST_TEST(!reachedPointB);
         co_return;
     };
 
@@ -86,6 +85,6 @@ TEST(Event, set_before_wait) {
     boost::asio::co_spawn(ioContext, task(), boost::asio::detached);
     ioContext.run();
 
-    EXPECT_TRUE(reachedPointA);
-    EXPECT_TRUE(reachedPointB);
+    BOOST_TEST(reachedPointA);
+    BOOST_TEST(reachedPointB);
 }

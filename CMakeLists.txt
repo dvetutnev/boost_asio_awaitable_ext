@@ -23,7 +23,6 @@ conan_cmake_install(
 add_compile_definitions(BOOST_ASIO_HAS_CO_AWAIT=1)
 
 find_package(Boost REQUIRED)
-find_package(GTest REQUIRED)
 
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE include)

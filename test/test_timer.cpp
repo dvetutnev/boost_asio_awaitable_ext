@@ -2,7 +2,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 
-#include <gtest/gtest.h>
+#include <boost/test/unit_test.hpp>
 
 using namespace std::chrono_literals;
 
@@ -16,7 +16,8 @@ boost::asio::awaitable<void> timer(std::chrono::milliseconds duration) {
 };
 } // Anonymous namesapce
 
-TEST(asio_deadline_timer, _) {
+BOOST_AUTO_TEST_CASE(asio_system_timer)
+{
     boost::asio::io_context ioContext;
 
     auto start = std::chrono::system_clock::now();
@@ -26,6 +27,6 @@ TEST(asio_deadline_timer, _) {
 
     auto duration = std::chrono::system_clock::now() - start;
 
-    EXPECT_TRUE(duration >= 100ms);
-    EXPECT_TRUE(duration <= 200ms);
+    BOOST_TEST(duration >= 100ms);
+    BOOST_TEST(duration <= 200ms);
 }
