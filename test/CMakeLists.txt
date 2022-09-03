@@ -2,6 +2,7 @@ add_executable(tests
     test_timer.cpp
     test_schedule.cpp
     test_event.cpp
+    test_sequence_traits.cpp
     main.cpp)
 
 target_link_libraries(tests
