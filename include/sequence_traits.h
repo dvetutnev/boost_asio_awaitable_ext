@@ -9,12 +9,12 @@
 
 #include <type_traits>
 
-template<typename Sequence>
+template<typename TSequence>
 struct SequenceTraits
 {
-    using value_type = Sequence;
-    using difference_type = std::make_signed_t<Sequence>;
-    using size_type = std::make_unsigned_t<Sequence>;
+    using value_type = TSequence;
+    using difference_type = std::make_signed_t<TSequence>;
+    using size_type = std::make_unsigned_t<TSequence>;
 
     static constexpr value_type initial_sequence = static_cast<value_type>(-1);
 

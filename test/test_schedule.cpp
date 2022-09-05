@@ -27,14 +27,14 @@ BOOST_AUTO_TEST_CASE(test_schedule)
             co_return;
     };
 
-    auto app = [&]() -> boost::asio::awaitable<void> {
+    auto main = [&]() -> boost::asio::awaitable<void> {
             using namespace boost::asio::experimental::awaitable_operators;
             co_await(process() && check());
             co_return;
     };
 
     boost::asio::io_context ioContext;
-    boost::asio::co_spawn(ioContext, app(), boost::asio::detached);
+    boost::asio::co_spawn(ioContext, main(), boost::asio::detached);
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
