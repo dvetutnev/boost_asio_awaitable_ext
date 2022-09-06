@@ -3,6 +3,7 @@ add_executable(tests
     test_schedule.cpp
     test_event.cpp
     test_sequence_traits.cpp
+    test_sequence_barrier.cpp
     main.cpp)
 
 target_link_libraries(tests

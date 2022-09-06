@@ -5,6 +5,8 @@
 
 #include <limits>
 
+namespace boost::asio::awaitable_ext::test {
+
 using SequenceTypes = boost::mpl::list<std::uint8_t,
                                        std::uint16_t,
                                        std::uint32_t,
@@ -39,3 +41,5 @@ BOOST_AUTO_TEST_CASE(SequenceTraits_precedes_unsigned_char)
     assert(Traits::precedes(255u, 127u));
     assert(!Traits::precedes(255u, 128u));
 }
+
+} // namespace boost::asio::awaitable_ext::test

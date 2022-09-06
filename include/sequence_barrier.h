@@ -3,6 +3,8 @@
 #include "event.h"
 #include "sequence_traits.h"
 
+namespace boost::asio::awaitable_ext {
+
 template<typename TSequence = std::size_t,
          typename Traits = SequenceTraits<TSequence>>
 class SequenceBarrier
@@ -30,3 +32,5 @@ SequenceBarrier<TSequence, Traits>::~SequenceBarrier()
 {
     assert(_awaiters.load(std::memory_order_relaxed) == nullptr);
 }
+
+} // namespace boost::asio::awaitable_ext

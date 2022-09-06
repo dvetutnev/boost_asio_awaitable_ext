@@ -7,27 +7,29 @@
 
 #include <boost/test/unit_test.hpp>
 
+namespace boost::asio::awaitable_ext::test {
+
 BOOST_AUTO_TEST_CASE(test_Event)
 {
     bool reachedPointA = false;
     bool reachedPointB = false;
     Event event;
 
-    auto consumer = [&]() -> boost::asio::awaitable<void> {
+    auto consumer = [&]() -> awaitable<void> {
         reachedPointA = true;
 
-        boost::asio::any_io_executor executor = co_await boost::asio::this_coro::executor;
+        any_io_executor executor = co_await this_coro::executor;
         co_await event.wait(executor);
 
         reachedPointB = true;
         co_return;
     };
 
-    auto producer = [&]() -> boost::asio::awaitable<void> {
+    auto producer = [&]() -> awaitable<void> {
         BOOST_TEST(reachedPointA);
         BOOST_TEST(!reachedPointB);
 
-        boost::asio::any_io_executor executor = co_await boost::asio::this_coro::executor;
+        any_io_executor executor = co_await this_coro::executor;
         co_await schedule(executor);
 
         BOOST_TEST(reachedPointA);
@@ -37,14 +39,14 @@ BOOST_AUTO_TEST_CASE(test_Event)
         co_return;
     };
 
-    auto main = [&]() -> boost::asio::awaitable<void> {
-        using namespace boost::asio::experimental::awaitable_operators;
+    auto main = [&]() -> awaitable<void> {
+        using namespace experimental::awaitable_operators;
         co_await(consumer() && producer());
         co_return;
     };
 
-    boost::asio::io_context ioContext;
-    boost::asio::co_spawn(ioContext, main(), boost::asio::detached);
+    io_context ioContext;
+    co_spawn(ioContext, main(), detached);
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
@@ -59,32 +61,34 @@ BOOST_AUTO_TEST_CASE(test_Event_set_before_wait)
 
     event.set();
 
-    auto consumer = [&]() -> boost::asio::awaitable<void> {
+    auto consumer = [&]() -> awaitable<void> {
         reachedPointA = true;
 
-        boost::asio::any_io_executor executor = co_await boost::asio::this_coro::executor;
+        any_io_executor executor = co_await this_coro::executor;
         co_await event.wait(executor);
 
         reachedPointB = true;
         co_return;
     };
 
-    auto producer = [&]() -> boost::asio::awaitable<void> {
+    auto producer = [&]() -> awaitable<void> {
         BOOST_TEST(reachedPointA);
         BOOST_TEST(!reachedPointB);
         co_return;
     };
 
-    auto main = [&]() -> boost::asio::awaitable<void> {
-        using namespace boost::asio::experimental::awaitable_operators;
+    auto main = [&]() -> awaitable<void> {
+        using namespace experimental::awaitable_operators;
         co_await(consumer() && producer());
         co_return;
     };
 
-    boost::asio::io_context ioContext;
-    boost::asio::co_spawn(ioContext, main(), boost::asio::detached);
+    io_context ioContext;
+    co_spawn(ioContext, main(), detached);
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
     BOOST_TEST(reachedPointB);
 }
+
+} // namespace boost::asio::awaitable_ext::test

@@ -9,6 +9,8 @@
 
 #include <type_traits>
 
+namespace boost::asio::awaitable_ext {
+
 template<typename TSequence>
 struct SequenceTraits
 {
@@ -28,3 +30,5 @@ struct SequenceTraits
         return difference(a, b) < 0;
     }
 };
+
+} // namespace boost::asio::awaitable_ext

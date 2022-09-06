@@ -2,6 +2,8 @@
 
 #include <boost/asio/use_awaitable.hpp>
 
+namespace boost::asio::awaitable_ext {
+
 class Event
 {
     enum class State { not_set, not_set_consumer_waiting, set };
@@ -11,11 +13,11 @@ class Event
 public:
     Event() : _state{State::not_set} {}
 
-    boost::asio::awaitable<void> wait(boost::asio::any_io_executor executor) {
+    awaitable<void> wait(any_io_executor executor) {
         auto initiate = [this, executor]<typename Handler>(Handler&& handler) mutable
         {
             this->_handler = [executor, handler = std::forward<Handler>(handler)]() mutable {
-                boost::asio::post(executor, std::move(handler));
+                post(executor, std::move(handler));
             };
 
             State oldState = State::not_set;
@@ -30,9 +32,9 @@ public:
             }
         };
 
-        return boost::asio::async_initiate<
-            decltype(boost::asio::use_awaitable), void()>(
-                initiate, boost::asio::use_awaitable);
+        return async_initiate<
+            decltype(use_awaitable), void()>(
+                initiate, use_awaitable);
     }
 
     void set() {
@@ -43,3 +45,5 @@ public:
         }
     }
 };
+
+} // namespace boost::asio::awaitable_ext
