@@ -3,9 +3,11 @@
 #include "event.h"
 #include "sequence_traits.h"
 
+#include <concepts>
+
 namespace boost::asio::awaitable_ext {
 
-template<typename TSequence = std::size_t,
+template<std::unsigned_integral TSequence = std::size_t,
          typename Traits = SequenceTraits<TSequence>>
 class SequenceBarrier
 {
@@ -22,20 +24,20 @@ private:
     std::atomic<Awaiter*> _awaiters;
 };
 
-template<typename TSequence, typename Traits>
+template<std::unsigned_integral TSequence, typename Traits>
 SequenceBarrier<TSequence, Traits>::SequenceBarrier(TSequence initialSequence)
     :
     _lastKnowPublished{initialSequence},
     _awaiters{nullptr}
 {}
 
-template<typename TSequence, typename Traits>
+template<std::unsigned_integral TSequence, typename Traits>
 SequenceBarrier<TSequence, Traits>::~SequenceBarrier()
 {
     assert(_awaiters.load(std::memory_order_relaxed) == nullptr);
 }
 
-template<typename TSequence, typename Traits>
+template<std::unsigned_integral TSequence, typename Traits>
 awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_publish(TSequence)
 {
     co_return _lastKnowPublished;
