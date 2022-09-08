@@ -19,7 +19,7 @@ BOOST_AUTO_TEST_CASE(SequenceTraits_pre)
             BOOST_TEST(lastUntilPublish == 255u);
         }
         {
-            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(128u);
+            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(142u);
             BOOST_TEST(lastUntilPublish == 255u);
         }
         {
