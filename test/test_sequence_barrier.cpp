@@ -6,25 +6,31 @@
 #include <boost/asio/experimental/awaitable_operators.hpp>
 
 #include <boost/test/unit_test.hpp>
+#include <boost/mpl/list.hpp>
 
 namespace boost::asio::awaitable_ext::test {
 
-BOOST_AUTO_TEST_CASE(SequenceTraits_pre)
+using SequenceTypes = boost::mpl::list<std::uint8_t,
+                                       std::uint16_t,
+                                       std::uint32_t,
+                                       std::size_t>;
+
+BOOST_AUTO_TEST_CASE_TEMPLATE(SequenceTraits_pre, T, SequenceTypes)
 {
-    SequenceBarrier<unsigned char> sequenceBarrier;
+    SequenceBarrier<T> sequenceBarrier;
 
     auto check = [&]() -> awaitable<void> {
         {
-            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(128u);
-            BOOST_TEST(lastUntilPublish == 255u);
+            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(std::numeric_limits<T>::max() / 2 + 1);
+            BOOST_TEST(lastUntilPublish == std::numeric_limits<T>::max());
         }
         {
-            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(142u);
-            BOOST_TEST(lastUntilPublish == 255u);
+            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(std::numeric_limits<T>::max() / 2 + 43);
+            BOOST_TEST(lastUntilPublish == std::numeric_limits<T>::max());
         }
         {
-            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(255u);
-            BOOST_TEST(lastUntilPublish == 255u);
+            auto lastUntilPublish = co_await sequenceBarrier.wait_until_publish(std::numeric_limits<T>::max());
+            BOOST_TEST(lastUntilPublish == std::numeric_limits<T>::max());
         }
         co_return;
 
