@@ -15,18 +15,20 @@ using SequenceTypes = boost::mpl::list<std::uint8_t,
 BOOST_AUTO_TEST_CASE_TEMPLATE(SequenceTraits_difference, T, SequenceTypes)
 {
     using Traits = SequenceTraits<T>;
+    using Value = typename Traits::value_type;
+    using Difference = typename Traits::difference_type;
 
-    BOOST_TEST(Traits::difference(0u, std::numeric_limits<typename Traits::value_type>::max() / 2 - 1) == std::numeric_limits<typename Traits::difference_type>::min() + 2);
-    BOOST_TEST(Traits::difference(0u, std::numeric_limits<typename Traits::value_type>::max() / 2) == std::numeric_limits<typename Traits::difference_type>::min() + 1);
-    BOOST_TEST(Traits::difference(0u, std::numeric_limits<typename Traits::value_type>::max() / 2 + 1) == std::numeric_limits<typename Traits::difference_type>::min());
-    BOOST_TEST(Traits::difference(0u, std::numeric_limits<typename Traits::value_type>::max() / 2 + 2) == std::numeric_limits<typename Traits::difference_type>::max());
-    BOOST_TEST(Traits::difference(0u, std::numeric_limits<typename Traits::value_type>::max()) == 1);
+    BOOST_TEST(Traits::difference(0u, std::numeric_limits<Value>::max() / 2 - 1) == std::numeric_limits<Difference>::min() + 2);
+    BOOST_TEST(Traits::difference(0u, std::numeric_limits<Value>::max() / 2) == std::numeric_limits<Difference>::min() + 1);
+    BOOST_TEST(Traits::difference(0u, std::numeric_limits<Value>::max() / 2 + 1) == std::numeric_limits<Difference>::min());
+    BOOST_TEST(Traits::difference(0u, std::numeric_limits<Value>::max() / 2 + 2) == std::numeric_limits<Difference>::max());
+    BOOST_TEST(Traits::difference(0u, std::numeric_limits<Value>::max()) == 1);
 
-    BOOST_TEST(Traits::difference(std::numeric_limits<typename Traits::value_type>::max() / 2 - 1, 0) == std::numeric_limits<typename Traits::difference_type>::max() - 1);
-    BOOST_TEST(Traits::difference(std::numeric_limits<typename Traits::value_type>::max() / 2, 0) == std::numeric_limits<typename Traits::difference_type>::max());
-    BOOST_TEST(Traits::difference(std::numeric_limits<typename Traits::value_type>::max() / 2 + 1, 0) == std::numeric_limits<typename Traits::difference_type>::min());
-    BOOST_TEST(Traits::difference(std::numeric_limits<typename Traits::value_type>::max() / 2 + 2, 0) == std::numeric_limits<typename Traits::difference_type>::min() + 1);
-    BOOST_TEST(Traits::difference(std::numeric_limits<typename Traits::value_type>::max(), 0) == -1);
+    BOOST_TEST(Traits::difference(std::numeric_limits<Value>::max() / 2 - 1, 0) == std::numeric_limits<Difference>::max() - 1);
+    BOOST_TEST(Traits::difference(std::numeric_limits<Value>::max() / 2, 0) == std::numeric_limits<Difference>::max());
+    BOOST_TEST(Traits::difference(std::numeric_limits<Value>::max() / 2 + 1, 0) == std::numeric_limits<Difference>::min());
+    BOOST_TEST(Traits::difference(std::numeric_limits<Value>::max() / 2 + 2, 0) == std::numeric_limits<Difference>::min() + 1);
+    BOOST_TEST(Traits::difference(std::numeric_limits<Value>::max(), 0) == -1);
 }
 
 BOOST_AUTO_TEST_CASE(SequenceTraits_precedes_unsigned_char)
