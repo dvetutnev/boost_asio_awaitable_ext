@@ -15,19 +15,20 @@ public:
     SequenceBarrier(TSequence initialSequence = Traits::initial_sequence);
     ~SequenceBarrier();
 
+    TSequence last_published() const;
     awaitable<TSequence> wait_until_publish(TSequence);
 
 private:
     class Awaiter;
 
-    std::atomic<TSequence> _lastKnowPublished;
+    std::atomic<TSequence> _lastPublished;
     std::atomic<Awaiter*> _awaiters;
 };
 
 template<std::unsigned_integral TSequence, typename Traits>
 SequenceBarrier<TSequence, Traits>::SequenceBarrier(TSequence initialSequence)
     :
-    _lastKnowPublished{initialSequence},
+    _lastPublished{initialSequence},
     _awaiters{nullptr}
 {}
 
@@ -38,9 +39,15 @@ SequenceBarrier<TSequence, Traits>::~SequenceBarrier()
 }
 
 template<std::unsigned_integral TSequence, typename Traits>
+TSequence SequenceBarrier<TSequence, Traits>::last_published() const
+{
+    return _lastPublished.load(std::memory_order_acquire);
+}
+
+template<std::unsigned_integral TSequence, typename Traits>
 awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_publish(TSequence)
 {
-    co_return _lastKnowPublished;
+    co_return last_published();
 }
 
 } // namespace boost::asio::awaitable_ext
