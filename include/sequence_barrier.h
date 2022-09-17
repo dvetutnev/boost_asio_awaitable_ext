@@ -16,7 +16,8 @@ public:
     ~SequenceBarrier();
 
     TSequence last_published() const;
-    awaitable<TSequence> wait_until_publish(TSequence);
+    awaitable<TSequence> wait_until_published(TSequence);
+    void publish(TSequence);
 
 private:
     class Awaiter;
@@ -45,9 +46,15 @@ TSequence SequenceBarrier<TSequence, Traits>::last_published() const
 }
 
 template<std::unsigned_integral TSequence, typename Traits>
-awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_publish(TSequence)
+awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TSequence)
 {
     co_return last_published();
+}
+
+template<std::unsigned_integral TSequence, typename Traits>
+void SequenceBarrier<TSequence, Traits>::publish(TSequence)
+{
+
 }
 
 } // namespace boost::asio::awaitable_ext
