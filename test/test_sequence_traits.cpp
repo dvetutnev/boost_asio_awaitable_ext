@@ -42,6 +42,7 @@ BOOST_AUTO_TEST_CASE(SequenceTraits_precedes_unsigned_char)
     assert(Traits::precedes(255u, 0u));
     assert(Traits::precedes(255u, 127u));
     assert(!Traits::precedes(255u, 128u));
+    assert(!Traits::precedes(255u, 255u));
 }
 
 } // namespace boost::asio::awaitable_ext::test

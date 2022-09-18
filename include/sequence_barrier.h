@@ -20,10 +20,33 @@ public:
     void publish(TSequence);
 
 private:
-    class Awaiter;
+    struct Awaiter;
+
+    void add_awaiter(Awaiter*);
 
     std::atomic<TSequence> _lastPublished;
     std::atomic<Awaiter*> _awaiters;
+};
+
+template<std::unsigned_integral TSequence, typename Traits>
+struct SequenceBarrier<TSequence, Traits>::SequenceBarrier::Awaiter
+{
+    const TSequence targetSequence;
+    Event _event;
+    TSequence _published;
+
+    explicit Awaiter(TSequence s) : targetSequence{s} {}
+
+    awaitable<TSequence> wait(any_io_executor executor) {
+        co_await _event.wait(executor);
+        co_return _published;
+    }
+
+    void resume(TSequence published) {
+        assert(!Traits::precedes(published, targetSequence));
+        _published = published;
+        _event.set();
+    }
 };
 
 template<std::unsigned_integral TSequence, typename Traits>
@@ -46,15 +69,37 @@ TSequence SequenceBarrier<TSequence, Traits>::last_published() const
 }
 
 template<std::unsigned_integral TSequence, typename Traits>
-awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TSequence)
+awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TSequence targetSequence)
 {
-    co_return last_published();
+    TSequence lastPublished = last_published();
+    if (!Traits::precedes(lastPublished, targetSequence)) {
+        co_return lastPublished;
+    }
+
+    auto awaiter = Awaiter{targetSequence};
+    add_awaiter(&awaiter);
+
+    any_io_executor executor = co_await this_coro::executor;
+    lastPublished = co_await awaiter.wait(executor);
+
+    co_return lastPublished;
 }
 
 template<std::unsigned_integral TSequence, typename Traits>
-void SequenceBarrier<TSequence, Traits>::publish(TSequence)
+void SequenceBarrier<TSequence, Traits>::publish(TSequence sequence)
 {
+    _lastPublished = sequence;
+    Awaiter* awaiter = _awaiters.load();
+    if (!Traits::precedes(sequence, awaiter->targetSequence)) {
+        awaiter->resume(sequence);
+        _awaiters = nullptr;
+    }
+}
 
+template<std::unsigned_integral TSequence, typename Traits>
+void SequenceBarrier<TSequence, Traits>::add_awaiter(Awaiter* awaiter)
+{
+    _awaiters = awaiter;
 }
 
 } // namespace boost::asio::awaitable_ext

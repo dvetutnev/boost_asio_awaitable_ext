@@ -33,15 +33,11 @@ BOOST_AUTO_TEST_CASE_TEMPLATE(previous, T, SequenceTypes)
             auto lastUntilPublish = co_await barrier.wait_until_published(std::numeric_limits<T>::max());
             BOOST_TEST(lastUntilPublish == std::numeric_limits<T>::max());
         }
-        co_return;
-
     };
 
     io_context ioContext;
     co_spawn(ioContext, main(), detached);
     ioContext.run();
-
-
 }
 
 BOOST_AUTO_TEST_CASE(wait_until_publish)
@@ -55,8 +51,10 @@ BOOST_AUTO_TEST_CASE(wait_until_publish)
     bool reachedF = false;
 
     auto consumer = [&]() -> awaitable<void> {
+        std::cout << "start consumer" << std::endl;
         BOOST_TEST(co_await barrier.wait_until_published(0) == 0);
         reachedA = true;
+        std::cout << "reachedA = true" << std::endl;
         BOOST_TEST(co_await barrier.wait_until_published(1) == 1);
         reachedB = true;
         BOOST_TEST(co_await barrier.wait_until_published(3) == 3);
@@ -70,9 +68,12 @@ BOOST_AUTO_TEST_CASE(wait_until_publish)
     };
 
     auto producer = [&]() -> awaitable<void> {
+        std::cout << "start producer" << std::endl;
         BOOST_TEST(!reachedA);
         barrier.publish(0);
+        std::cout << "barrier.publish(0)" << std::endl;
         co_await schedule(co_await this_coro::executor);
+        std::cout << "resume producer" << std::endl;
         BOOST_TEST(reachedA);
         BOOST_TEST(!reachedB);
         barrier.publish(1);
