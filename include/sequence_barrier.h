@@ -32,10 +32,12 @@ template<std::unsigned_integral TSequence, typename Traits>
 struct SequenceBarrier<TSequence, Traits>::SequenceBarrier::Awaiter
 {
     const TSequence targetSequence;
+    Awaiter* next;
+
     Event _event;
     TSequence _published;
 
-    explicit Awaiter(TSequence s) : targetSequence{s} {}
+    explicit Awaiter(TSequence s) : targetSequence{s}, next{nullptr} {}
 
     awaitable<TSequence> wait(any_io_executor executor) {
         co_await _event.wait(executor);
@@ -89,16 +91,55 @@ template<std::unsigned_integral TSequence, typename Traits>
 void SequenceBarrier<TSequence, Traits>::publish(TSequence sequence)
 {
     _lastPublished = sequence;
-    Awaiter* awaiter = _awaiters.load();
-    if (!Traits::precedes(sequence, awaiter->targetSequence)) {
-        awaiter->resume(sequence);
-        _awaiters = nullptr;
+    Awaiter* awaiters = _awaiters.load();
+    if (!awaiters) {
+        return;
+    }
+
+    // Check the list of awaiters for ones that are now satisfied by the sequence number
+    // we just published. Awaiters are added to either the 'awaitersToResume' list or to
+    // the 'awaitersToRequeue' list.
+    Awaiter* awaitersToRequeue;
+    Awaiter** awaitersToRequeueTail = &awaitersToRequeue;
+
+    Awaiter* awaitersToResume;
+    Awaiter** awaitersToResumeTail = &awaitersToResume;
+
+    do
+    {
+        if (Traits::precedes(sequence, awaiters->targetSequence))
+        {
+            // Target sequence not reached. Append to 'requeue' list.
+            *awaitersToRequeueTail = awaiters;
+            awaitersToRequeueTail = &(awaiters->next);
+        }
+        else
+        {
+            // Target sequence reached. Append to 'resume' list.
+            *awaitersToResumeTail = awaiters;
+            awaitersToResumeTail = &(awaiters->next);
+        }
+        awaiters = awaiters->next;
+    } while (awaiters);
+
+    // null-terminate the two lists.
+    *awaitersToRequeueTail = nullptr;
+    *awaitersToResumeTail = nullptr;
+
+    _awaiters = awaitersToRequeue;
+
+    while (awaitersToResume)
+    {
+        Awaiter* next = awaitersToResume->next;
+        awaitersToResume->resume(sequence);
+        awaitersToResume = next;
     }
 }
 
 template<std::unsigned_integral TSequence, typename Traits>
 void SequenceBarrier<TSequence, Traits>::add_awaiter(Awaiter* awaiter)
 {
+    awaiter->next = _awaiters;
     _awaiters = awaiter;
 }
 
