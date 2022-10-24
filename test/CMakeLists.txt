@@ -4,6 +4,7 @@ add_executable(tests
     test_event.cpp
     test_sequence_traits.cpp
     test_sequence_barrier.cpp
+    test_asio_multithread.cpp
     main.cpp)
 
 target_link_libraries(tests
