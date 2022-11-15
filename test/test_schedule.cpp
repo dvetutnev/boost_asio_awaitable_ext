@@ -3,8 +3,12 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/thread_pool.hpp>
 
 #include <boost/test/unit_test.hpp>
+
+#include <map>
+#include <thread>
 
 namespace boost::asio::awaitable_ext::test {
 
@@ -41,6 +45,27 @@ BOOST_AUTO_TEST_CASE(test_schedule)
 
     BOOST_TEST(reachedPointA);
     BOOST_TEST(reachedPointB);
+}
+
+BOOST_AUTO_TEST_CASE(test_schedule_multithread)
+{
+    thread_pool pool;
+    std::map<std::thread::id, std::size_t> ids;
+
+    auto main = [&]() -> awaitable<void> {
+        for (std::size_t i = 0; i < 1'000; i++) {
+             co_await schedule(pool.get_executor());
+             ++ids[std::this_thread::get_id()];
+        }
+        co_return;
+    };
+
+    co_spawn(pool.get_executor(), main(), detached);
+    pool.join();
+
+    for (const auto& [id, count] : ids) {
+        std::cout << id << ' ' << count << std::endl;
+    }
 }
 
 } // namespace boost::asio::awaitable_ext::test
