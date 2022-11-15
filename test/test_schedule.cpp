@@ -63,9 +63,13 @@ BOOST_AUTO_TEST_CASE(test_schedule_multithread)
     co_spawn(pool.get_executor(), main(), detached);
     pool.join();
 
+    std::size_t sum = 0;
     for (const auto& [id, count] : ids) {
+        sum += count;
         std::cout << id << ' ' << count << std::endl;
     }
+
+    BOOST_TEST(sum == 1'000);
 }
 
 } // namespace boost::asio::awaitable_ext::test
