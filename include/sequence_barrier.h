@@ -17,6 +17,7 @@ public:
 
     TSequence last_published() const;
     awaitable<TSequence> wait_until_published(TSequence);
+    awaitable<TSequence> wait_until_published(TSequence, any_io_executor);
     void publish(TSequence);
 
 private:
@@ -73,6 +74,13 @@ TSequence SequenceBarrier<TSequence, Traits>::last_published() const
 template<std::unsigned_integral TSequence, typename Traits>
 awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TSequence targetSequence)
 {
+    any_io_executor executor = co_await this_coro::executor;
+    co_return co_await wait_until_published(targetSequence, executor);
+}
+
+template<std::unsigned_integral TSequence, typename Traits>
+awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TSequence targetSequence, any_io_executor executor)
+{
     TSequence lastPublished = last_published();
     if (!Traits::precedes(lastPublished, targetSequence)) {
         co_return lastPublished;
@@ -80,10 +88,7 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TS
 
     auto awaiter = Awaiter{targetSequence};
     add_awaiter(&awaiter);
-
-    any_io_executor executor = co_await this_coro::executor;
     lastPublished = co_await awaiter.wait(executor);
-
     co_return lastPublished;
 }
 
