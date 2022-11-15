@@ -51,10 +51,8 @@ BOOST_AUTO_TEST_CASE(single_consumer)
     bool reachedF = false;
 
     auto consumer = [&]() -> awaitable<void> {
-        std::cout << "start consumer" << std::endl;
         BOOST_TEST(co_await barrier.wait_until_published(0) == 0);
         reachedA = true;
-        std::cout << "reachedA = true" << std::endl;
         BOOST_TEST(co_await barrier.wait_until_published(1) == 1);
         reachedB = true;
         BOOST_TEST(co_await barrier.wait_until_published(3) == 3);
@@ -68,12 +66,9 @@ BOOST_AUTO_TEST_CASE(single_consumer)
     };
 
     auto producer = [&]() -> awaitable<void> {
-        std::cout << "start producer" << std::endl;
         BOOST_TEST(!reachedA);
         barrier.publish(0);
-        std::cout << "barrier.publish(0)" << std::endl;
         co_await schedule(co_await this_coro::executor);
-        std::cout << "resume producer" << std::endl;
         BOOST_TEST(reachedA);
         BOOST_TEST(!reachedB);
         barrier.publish(1);
