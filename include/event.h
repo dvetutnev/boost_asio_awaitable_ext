@@ -23,9 +23,7 @@ public:
             State oldState = State::not_set;
             const bool isWaiting = _state.compare_exchange_strong(
                 oldState,
-                State::not_set_consumer_waiting,
-                std::memory_order_release,
-                std::memory_order_acquire);
+                State::not_set_consumer_waiting);
 
             if (!isWaiting) {
                 this->_handler();
@@ -38,8 +36,7 @@ public:
     }
 
     void set() {
-        const State oldState = _state.exchange(State::set, std::memory_order_acq_rel);
-
+        const State oldState = _state.exchange(State::set);
         if (oldState == State::not_set_consumer_waiting) {
             _handler();
         }

@@ -4,6 +4,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/thread_pool.hpp>
 
 #include <boost/test/unit_test.hpp>
 #include <boost/mpl/list.hpp>
@@ -186,6 +187,73 @@ BOOST_AUTO_TEST_CASE(multiply_consumers)
     io_context ioContext;
     co_spawn(ioContext, main(), detached);
     ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(multi_thread)
+{
+    thread_pool tp{2};
+
+    SequenceBarrier<std::size_t> writeBarrier;
+    SequenceBarrier<std::size_t> readBarrier;
+
+    constexpr std::size_t iterationCount = 10'000'000;
+
+    constexpr std::size_t bufferSize = 256;
+    std::uint64_t buffer[bufferSize];
+    std::uint64_t result = 0;
+
+    auto consumer = [&]() -> awaitable<void>
+    {
+        bool reachedEnd = false;
+        std::size_t nextToRead = 0;
+        do {
+            std::size_t available = co_await writeBarrier.wait_until_published(nextToRead);
+            do {
+                result += buffer[nextToRead % bufferSize];
+            } while (nextToRead++ != available);
+
+            // Zero value is sentinel that indicates the end of the stream.
+            reachedEnd = buffer[available % bufferSize] == 0;
+
+            // Notify that we've finished processing up to 'available'.
+            readBarrier.publish(available);
+        } while (!reachedEnd);
+    };
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        std::size_t  available = readBarrier.last_published() + bufferSize;
+        for (std::size_t nextToWrite = 0; nextToWrite <= iterationCount; ++nextToWrite)
+        {
+            if (SequenceTraits<std::size_t>::precedes(available, nextToWrite))
+            {
+                available = co_await readBarrier.wait_until_published(nextToWrite - bufferSize) + bufferSize;
+            }
+
+            if (nextToWrite == iterationCount)
+            {
+                // Write sentinel (zero) as last element.
+                buffer[nextToWrite % bufferSize] = 0;
+            }
+            else
+            {
+                // Write value
+                buffer[nextToWrite % bufferSize] = nextToWrite + 1;
+            }
+
+            // Notify consumer that we've published a new value.
+            writeBarrier.publish(nextToWrite);
+        }
+    };
+
+    co_spawn(tp.get_executor(), consumer(), detached);
+    co_spawn(tp.get_executor(), producer(), detached);
+    tp.join();
+
+    constexpr std::uint64_t expectedResult =
+        static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
+
+    BOOST_TEST(result == expectedResult);
 }
 
 BOOST_AUTO_TEST_SUITE_END();

@@ -12,13 +12,13 @@
 
 namespace boost::asio::awaitable_ext::test {
 
-BOOST_AUTO_TEST_CASE(asio_multithread)
+BOOST_AUTO_TEST_CASE(asio_multithread, * unit_test::disabled())
 {
     std::mutex mtx;
     std::map<std::thread::id, int> ids;
 
     const unsigned threadCount = std::thread::hardware_concurrency();
-    thread_pool pool{threadCount};
+    thread_pool tp{threadCount};
 
     auto task = [&]() -> awaitable<void> {
         auto id = std::this_thread::get_id();
@@ -28,10 +28,10 @@ BOOST_AUTO_TEST_CASE(asio_multithread)
     };
 
     for (unsigned i = 0; i < threadCount; ++i) {
-        co_spawn(pool.get_executor(), task(), detached);
+        co_spawn(tp.get_executor(), task(), detached);
     }
 
-    pool.join();
+    tp.join();
 
     BOOST_TEST(ids.size() >= threadCount / 2);
 }
