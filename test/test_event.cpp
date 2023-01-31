@@ -13,6 +13,7 @@
 namespace boost::asio::awaitable_ext::test {
 
 BOOST_AUTO_TEST_SUITE(tests_Event);
+
 BOOST_AUTO_TEST_CASE(simple)
 {
     bool reachedPointA = false;

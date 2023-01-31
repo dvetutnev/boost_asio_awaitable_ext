@@ -12,7 +12,9 @@
 
 namespace boost::asio::awaitable_ext::test {
 
-BOOST_AUTO_TEST_CASE(test_schedule)
+BOOST_AUTO_TEST_SUITE(tests_schedule);
+
+BOOST_AUTO_TEST_CASE(_)
 {
     bool reachedPointA = false;
     bool reachedPointB = false;
@@ -47,7 +49,7 @@ BOOST_AUTO_TEST_CASE(test_schedule)
     BOOST_TEST(reachedPointB);
 }
 
-BOOST_AUTO_TEST_CASE(test_schedule_multithread)
+BOOST_AUTO_TEST_CASE(multithread)
 {
     thread_pool pool;
     std::map<std::thread::id, std::size_t> ids;
@@ -71,5 +73,7 @@ BOOST_AUTO_TEST_CASE(test_schedule_multithread)
 
     BOOST_TEST(sum == 1'000);
 }
+
+BOOST_AUTO_TEST_SUITE_END();
 
 } // namespace boost::asio::awaitable_ext::test

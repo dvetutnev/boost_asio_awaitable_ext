@@ -12,7 +12,9 @@ using SequenceTypes = boost::mpl::list<std::uint8_t,
                                        std::uint32_t,
                                        std::size_t>;
 
-BOOST_AUTO_TEST_CASE_TEMPLATE(SequenceTraits_difference, T, SequenceTypes)
+BOOST_AUTO_TEST_SUITE(tests_SequenceTraits);
+
+BOOST_AUTO_TEST_CASE_TEMPLATE(difference, T, SequenceTypes)
 {
     using Traits = SequenceTraits<T>;
     using Value = typename Traits::value_type;
@@ -31,7 +33,7 @@ BOOST_AUTO_TEST_CASE_TEMPLATE(SequenceTraits_difference, T, SequenceTypes)
     BOOST_TEST(Traits::difference(std::numeric_limits<Value>::max(), 0) == -1);
 }
 
-BOOST_AUTO_TEST_CASE(SequenceTraits_precedes_unsigned_char)
+BOOST_AUTO_TEST_CASE(precedes_unsigned_char)
 {
     using Traits = SequenceTraits<unsigned char>;
 
@@ -44,5 +46,7 @@ BOOST_AUTO_TEST_CASE(SequenceTraits_precedes_unsigned_char)
     assert(!Traits::precedes(255u, 128u));
     assert(!Traits::precedes(255u, 255u));
 }
+
+BOOST_AUTO_TEST_SUITE_END();
 
 } // namespace boost::asio::awaitable_ext::test

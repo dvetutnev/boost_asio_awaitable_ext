@@ -14,7 +14,7 @@ boost::asio::awaitable<void> timer(std::chrono::milliseconds duration) {
 
     co_await timer.async_wait(boost::asio::use_awaitable);
 };
-} // Anonymous namesapce
+} // Anonymous namespace
 
 BOOST_AUTO_TEST_CASE(asio_system_timer)
 {

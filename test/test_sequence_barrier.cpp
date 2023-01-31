@@ -17,6 +17,7 @@ using SequenceTypes = boost::mpl::list<std::uint8_t,
                                        std::size_t>;
 
 BOOST_AUTO_TEST_SUITE(tests_SequenceBarrier);
+
 BOOST_AUTO_TEST_CASE_TEMPLATE(previous, T, SequenceTypes)
 {
     SequenceBarrier<T> barrier;
