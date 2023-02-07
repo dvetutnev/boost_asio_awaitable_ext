@@ -1,5 +1,6 @@
 [requires]
 boost/1.81.0
+benchmark/1.7.1
 
 [generators]
 cmake_find_package
