@@ -95,8 +95,17 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TS
 template<std::unsigned_integral TSequence, typename Traits>
 void SequenceBarrier<TSequence, Traits>::publish(TSequence sequence)
 {
-    _lastPublished = sequence;
-    Awaiter* awaiters = _awaiters.load();
+    _lastPublished.store(sequence);
+
+    // Cheaper check to see if there are any awaiting coroutines.
+//    Awaiter* awaiters = _awaiters.load();
+//    if (!awaiters) {
+//        return;
+//    }
+
+    Awaiter* awaiters;
+
+    awaiters = _awaiters.exchange(nullptr);
     if (!awaiters) {
         return;
     }
@@ -131,7 +140,16 @@ void SequenceBarrier<TSequence, Traits>::publish(TSequence sequence)
     *awaitersToRequeueTail = nullptr;
     *awaitersToResumeTail = nullptr;
 
-    _awaiters = awaitersToRequeue;
+    if (awaitersToRequeue)
+    {
+        Awaiter* oldHead = nullptr;
+        while (!_awaiters.compare_exchange_weak(
+            oldHead,
+            awaitersToRequeue))
+        {
+            *awaitersToRequeueTail = oldHead;
+        }
+    }
 
     while (awaitersToResume)
     {
@@ -144,8 +162,87 @@ void SequenceBarrier<TSequence, Traits>::publish(TSequence sequence)
 template<std::unsigned_integral TSequence, typename Traits>
 void SequenceBarrier<TSequence, Traits>::add_awaiter(Awaiter* awaiter)
 {
-    awaiter->next = _awaiters;
-    _awaiters = awaiter;
+    TSequence targetSequence = awaiter->targetSequence;
+    Awaiter* awaitersToRequeue = awaiter;
+    Awaiter** awaitersToRequeueTail = &(awaiter->next);
+
+    TSequence lastKnownPublished;
+    Awaiter* awaitersToResume;
+    Awaiter** awaitersToResumeTail = &awaitersToResume;
+
+    do
+    {
+        // Enqueue the awaiter(s)
+        {
+            auto* oldHead = _awaiters.load();
+            do
+            {
+                *awaitersToRequeueTail = oldHead;
+            } while (!_awaiters.compare_exchange_weak(
+                oldHead,
+                awaitersToRequeue));
+        }
+
+        // Check that the sequence we were waiting for wasn't published while
+        // we were enqueueing the waiter.
+        // This needs to be seq_cst memory order to ensure that in the case that the producer
+        // publishes a new sequence number concurrently with this call that we either see
+        // their write to m_lastPublished after enqueueing our awaiter, or they see our
+        // write to m_awaiters after their write to m_lastPublished.
+        lastKnownPublished = _lastPublished.load();
+        if (Traits::precedes(lastKnownPublished, targetSequence))
+        {
+            // None of the the awaiters we enqueued have been satisfied yet.
+            break;
+        }
+
+        // Reset the requeue list to empty
+        awaitersToRequeueTail = &awaitersToRequeue;
+
+        // At least one of the awaiters we just enqueued is now satisfied by a concurrently
+        // published sequence number. The producer thread may not have seen our write to m_awaiters
+        // so we need to try to re-acquire the list of awaiters to ensure that the waiters that
+        // are now satisfied are woken up.
+        auto* awaiters = _awaiters.exchange(nullptr, std::memory_order_acquire);
+
+        auto minDiff = std::numeric_limits<typename Traits::difference_type>::max();
+
+        while (awaiters)
+        {
+            const auto diff = Traits::difference(awaiters->targetSequence, lastKnownPublished);
+            if (diff > 0)
+            {
+                *awaitersToRequeueTail = awaiters;
+                awaitersToRequeueTail = &(awaiters->next);
+                minDiff = diff < minDiff ? diff : minDiff;
+            }
+            else
+            {
+                *awaitersToResumeTail = awaiters;
+                awaitersToResumeTail = &(awaiters->next);
+            }
+
+            awaiters = awaiters->next;
+        }
+
+        // Null-terminate the list of awaiters to requeue.
+        *awaitersToRequeueTail = nullptr;
+
+        // Calculate the earliest target sequence required by any of the awaiters to requeue.
+        targetSequence = static_cast<TSequence>(lastKnownPublished + minDiff);
+
+    } while (awaitersToRequeue);
+
+    // Null-terminate the list of awaiters to resume
+    *awaitersToResumeTail = nullptr;
+
+    // Resume the awaiters that are ready
+    while (awaitersToResume != nullptr)
+    {
+        auto* next = awaitersToResume->next;
+        awaitersToResume->resume(lastKnownPublished);
+        awaitersToResume = next;
+    }
 }
 
 } // namespace boost::asio::awaitable_ext
