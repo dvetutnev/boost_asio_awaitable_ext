@@ -203,7 +203,7 @@ void SequenceBarrier<TSequence, Traits>::add_awaiter(Awaiter* awaiter)
         // published sequence number. The producer thread may not have seen our write to m_awaiters
         // so we need to try to re-acquire the list of awaiters to ensure that the waiters that
         // are now satisfied are woken up.
-        auto* awaiters = _awaiters.exchange(nullptr, std::memory_order_acquire);
+        auto* awaiters = _awaiters.exchange(nullptr);
 
         auto minDiff = std::numeric_limits<typename Traits::difference_type>::max();
 
