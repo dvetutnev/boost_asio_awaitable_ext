@@ -64,8 +64,10 @@ BOOST_AUTO_TEST_CASE(single_consumer)
 
         BOOST_TEST(co_await barrier.wait_until_published(4) == 10);
         reachedD = true;
+
         co_await barrier.wait_until_published(5);
         reachedE = true;
+
         co_await barrier.wait_until_published(10);
         reachedF = true;
     };
@@ -93,7 +95,11 @@ BOOST_AUTO_TEST_CASE(single_consumer)
         barrier.publish(10);
         co_await schedule(co_await this_coro::executor);
         BOOST_TEST(reachedD);
+
+        co_await schedule(co_await this_coro::executor);
         BOOST_TEST(reachedE);
+
+        co_await schedule(co_await this_coro::executor);
         BOOST_TEST(reachedF);
     };
 
@@ -196,7 +202,7 @@ BOOST_AUTO_TEST_CASE(multiply_consumers)
     ioContext.run();
 }
 
-BOOST_AUTO_TEST_CASE(multi_thread, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(multi_thread)
 {
     thread_pool tp{2};
 
