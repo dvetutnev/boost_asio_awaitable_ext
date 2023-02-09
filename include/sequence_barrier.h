@@ -7,36 +7,12 @@
 
 namespace boost::asio::awaitable_ext {
 
-template<std::unsigned_integral TSequence = std::size_t,
-         typename Traits = SequenceTraits<TSequence>>
-class SequenceBarrier
-{
-public:
-    SequenceBarrier(TSequence initialSequence = Traits::initial_sequence);
-    ~SequenceBarrier();
-
-    TSequence last_published() const;
-    awaitable<TSequence> wait_until_published(TSequence);
-    awaitable<TSequence> wait_until_published(TSequence, any_io_executor);
-    void publish(TSequence);
-
-private:
-    struct Awaiter;
-
-    void add_awaiter(Awaiter*);
-
-    std::atomic<TSequence> _lastPublished;
-    std::atomic<Awaiter*> _awaiters;
-};
-
+namespace detail {
 template<std::unsigned_integral TSequence, typename Traits>
-struct SequenceBarrier<TSequence, Traits>::SequenceBarrier::Awaiter
+struct Awaiter
 {
     const TSequence targetSequence;
     Awaiter* next;
-
-    Event _event;
-    TSequence _published;
 
     explicit Awaiter(TSequence s) : targetSequence{s}, next{nullptr} {}
 
@@ -50,36 +26,63 @@ struct SequenceBarrier<TSequence, Traits>::SequenceBarrier::Awaiter
         _published = published;
         _event.set();
     }
+
+private:
+    Event _event;
+    TSequence _published;
+};
+} // namespace detail
+
+template<std::unsigned_integral TSequence = std::size_t,
+         typename Traits = SequenceTraits<TSequence>,
+         typename Awaiter = detail::Awaiter<TSequence, Traits>>
+class SequenceBarrier
+{
+public:
+    SequenceBarrier(TSequence initialSequence = Traits::initial_sequence);
+    ~SequenceBarrier();
+
+    TSequence last_published() const;
+    awaitable<TSequence> wait_until_published(TSequence);
+    awaitable<TSequence> wait_until_published(TSequence, any_io_executor);
+    void publish(TSequence);
+
+protected:
+    void add_awaiter(Awaiter*);
+
+private:
+    std::atomic<TSequence> _lastPublished;
+    std::atomic<Awaiter*> _awaiters;
 };
 
-template<std::unsigned_integral TSequence, typename Traits>
-SequenceBarrier<TSequence, Traits>::SequenceBarrier(TSequence initialSequence)
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+SequenceBarrier<TSequence, Traits, Awaiter>::SequenceBarrier(TSequence initialSequence)
     :
     _lastPublished{initialSequence},
     _awaiters{nullptr}
 {}
 
-template<std::unsigned_integral TSequence, typename Traits>
-SequenceBarrier<TSequence, Traits>::~SequenceBarrier()
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+SequenceBarrier<TSequence, Traits, Awaiter>::~SequenceBarrier()
 {
     assert(_awaiters.load(std::memory_order_relaxed) == nullptr);
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-TSequence SequenceBarrier<TSequence, Traits>::last_published() const
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+TSequence SequenceBarrier<TSequence, Traits, Awaiter>::last_published() const
 {
     return _lastPublished.load(std::memory_order_acquire);
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TSequence targetSequence)
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence)
 {
     any_io_executor executor = co_await this_coro::executor;
     co_return co_await wait_until_published(targetSequence, executor);
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TSequence targetSequence, any_io_executor executor)
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence, any_io_executor executor)
 {
     TSequence lastPublished = last_published();
     if (!Traits::precedes(lastPublished, targetSequence)) {
@@ -92,8 +95,8 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits>::wait_until_published(TS
     co_return lastPublished;
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-void SequenceBarrier<TSequence, Traits>::publish(TSequence sequence)
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
 {
     _lastPublished.store(sequence);
 
@@ -159,8 +162,8 @@ void SequenceBarrier<TSequence, Traits>::publish(TSequence sequence)
     }
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-void SequenceBarrier<TSequence, Traits>::add_awaiter(Awaiter* awaiter)
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter)
 {
     TSequence targetSequence = awaiter->targetSequence;
     Awaiter* awaitersToRequeue = awaiter;

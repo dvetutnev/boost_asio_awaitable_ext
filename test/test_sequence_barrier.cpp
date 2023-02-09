@@ -1,5 +1,6 @@
 #include "sequence_barrier.h"
 #include "schedule.h"
+#include "sequence_barrier_mock_awaiter.h"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/detached.hpp>
@@ -202,10 +203,8 @@ BOOST_AUTO_TEST_CASE(multiply_consumers)
     ioContext.run();
 }
 
-BOOST_AUTO_TEST_CASE(multi_thread)
+BOOST_AUTO_TEST_CASE(multithread)
 {
-    thread_pool tp{2};
-
     SequenceBarrier<std::size_t> writeBarrier;
     SequenceBarrier<std::size_t> readBarrier;
 
@@ -259,14 +258,80 @@ BOOST_AUTO_TEST_CASE(multi_thread)
         }
     };
 
-    co_spawn(tp.get_executor(), consumer(), detached);
-    co_spawn(tp.get_executor(), producer(), detached);
+    thread_pool tp{2};
+    any_io_executor executorA = tp.get_executor();
+    any_io_executor executorB = tp.get_executor();
+    co_spawn(executorA, consumer(), detached);
+    co_spawn(executorB, producer(), detached);
     tp.join();
 
     constexpr std::uint64_t expectedResult =
         static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
 
     BOOST_TEST(result == expectedResult);
+}
+
+using SequenceTypesTSan = boost::mpl::list<std::uint8_t,
+                                           std::uint16_t>;
+
+BOOST_TEST_DECORATOR(* unit_test::disabled())
+BOOST_AUTO_TEST_CASE_TEMPLATE(tsan, T, SequenceTypesTSan)
+{
+    using BaseBarrier = SequenceBarrier<T, SequenceTraits<T>, MockAwaiter<T>>;
+    struct Barrier : BaseBarrier
+    {
+        using BaseBarrier::add_awaiter;
+    };
+    Barrier barrier;
+
+    constexpr std::size_t countAwaiters = std::numeric_limits<T>::max() + 1;
+    constexpr T quater = std::numeric_limits<T>::max() / 4;
+
+    MockAwaitersStorage<T> awaiters;
+
+    auto consumer = [&, previos = T{}] mutable
+    {
+        for (;;)
+        {
+            const T lastPublished = barrier.last_published();
+            if (lastPublished == 0) {
+                break;
+            }
+            if (lastPublished == previos) {
+                continue;
+            }
+            previos = lastPublished;
+
+            if (auto* awaiter = awaiters.get_upper(lastPublished + quater); awaiter != nullptr) {
+                barrier.add_awaiter(awaiter);
+            }
+            if (auto* awaiter = awaiters.get_lower(lastPublished - quater); awaiter != nullptr) {
+                barrier.add_awaiter(awaiter);
+            }
+        }
+    };
+
+    auto producer = [&]()
+    {
+        for (T i = 1; ; i++) {
+            barrier.publish(i);
+            if (i == 0) {
+                break;
+            }
+        }
+
+        // Resume remaining awaiters
+        for (std::size_t i = 0; i < countAwaiters; i++) {
+            barrier.publish(i);
+        }
+    };
+
+    thread_pool tp{2};
+    any_io_executor executorA = tp.get_executor();
+    any_io_executor executorB = tp.get_executor();
+    post(executorA, consumer);
+    post(executorB, producer);
+    tp.join();
 }
 
 BOOST_AUTO_TEST_SUITE_END();
