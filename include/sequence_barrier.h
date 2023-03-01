@@ -98,7 +98,7 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_pub
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
 void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
 {
-    _lastPublished.store(sequence);
+    _lastPublished.store(sequence, std::memory_order_seq_cst);
 
     // Cheaper check to see if there are any awaiting coroutines.
 //    Awaiter* awaiters = _awaiters.load();
@@ -108,7 +108,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
 
     Awaiter* awaiters;
 
-    awaiters = _awaiters.exchange(nullptr);
+    awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
     if (!awaiters) {
         return;
     }
@@ -148,7 +148,9 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
         Awaiter* oldHead = nullptr;
         while (!_awaiters.compare_exchange_weak(
             oldHead,
-            awaitersToRequeue))
+            awaitersToRequeue,
+            std::memory_order_release,
+            std::memory_order_relaxed))
         {
             *awaitersToRequeueTail = oldHead;
         }
@@ -177,13 +179,15 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter)
     {
         // Enqueue the awaiter(s)
         {
-            auto* oldHead = _awaiters.load();
+            auto* oldHead = _awaiters.load(std::memory_order_relaxed);
             do
             {
                 *awaitersToRequeueTail = oldHead;
             } while (!_awaiters.compare_exchange_weak(
                 oldHead,
-                awaitersToRequeue));
+                awaitersToRequeue,
+                std::memory_order_seq_cst,
+                std::memory_order_relaxed));
         }
 
         // Check that the sequence we were waiting for wasn't published while
@@ -192,7 +196,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter)
         // publishes a new sequence number concurrently with this call that we either see
         // their write to m_lastPublished after enqueueing our awaiter, or they see our
         // write to m_awaiters after their write to m_lastPublished.
-        lastKnownPublished = _lastPublished.load();
+        lastKnownPublished = _lastPublished.load(std::memory_order_seq_cst);
         if (Traits::precedes(lastKnownPublished, targetSequence))
         {
             // None of the the awaiters we enqueued have been satisfied yet.
@@ -206,7 +210,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter)
         // published sequence number. The producer thread may not have seen our write to m_awaiters
         // so we need to try to re-acquire the list of awaiters to ensure that the waiters that
         // are now satisfied are woken up.
-        auto* awaiters = _awaiters.exchange(nullptr);
+        auto* awaiters = _awaiters.exchange(nullptr, std::memory_order_acquire);
 
         auto minDiff = std::numeric_limits<typename Traits::difference_type>::max();
 
