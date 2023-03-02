@@ -16,7 +16,7 @@ struct Awaiter
 
     explicit Awaiter(TSequence s) : targetSequence{s}, next{nullptr} {}
 
-    awaitable<TSequence> wait(any_io_executor executor) {
+    awaitable<TSequence> wait(any_io_executor executor) const {
         co_await _event.wait(executor);
         co_return _published;
     }
@@ -43,16 +43,16 @@ public:
     ~SequenceBarrier();
 
     TSequence last_published() const;
-    [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence);
-    [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence, any_io_executor);
+    [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence) const;
+    [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence, any_io_executor) const;
     void publish(TSequence);
 
 protected:
-    void add_awaiter(Awaiter*);
+    void add_awaiter(Awaiter*) const;
 
 private:
     std::atomic<TSequence> _lastPublished;
-    std::atomic<Awaiter*> _awaiters;
+    mutable std::atomic<Awaiter*> _awaiters;
 };
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
@@ -75,14 +75,14 @@ TSequence SequenceBarrier<TSequence, Traits, Awaiter>::last_published() const
 }
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
-awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence)
+awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence) const
 {
     any_io_executor executor = co_await this_coro::executor;
     co_return co_await wait_until_published(targetSequence, executor);
 }
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
-awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence, any_io_executor executor)
+awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence, any_io_executor executor) const
 {
     TSequence lastPublished = last_published();
     if (!Traits::precedes(lastPublished, targetSequence)) {
@@ -165,7 +165,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
 }
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
-void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter)
+void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) const
 {
     TSequence targetSequence = awaiter->targetSequence;
     Awaiter* awaitersToRequeue = awaiter;
