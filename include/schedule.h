@@ -4,7 +4,7 @@
 
 namespace boost::asio::awaitable_ext {
 
-inline auto schedule(any_io_executor executor) -> awaitable<void>
+[[nodiscard]] inline auto schedule(any_io_executor executor) -> awaitable<void>
 {
     auto initiate = [executor]<typename Handler>(Handler&& handler) mutable
     {

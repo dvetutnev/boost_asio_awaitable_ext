@@ -43,8 +43,8 @@ public:
     ~SequenceBarrier();
 
     TSequence last_published() const;
-    awaitable<TSequence> wait_until_published(TSequence);
-    awaitable<TSequence> wait_until_published(TSequence, any_io_executor);
+    [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence);
+    [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence, any_io_executor);
     void publish(TSequence);
 
 protected:

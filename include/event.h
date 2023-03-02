@@ -13,7 +13,7 @@ class Event
 public:
     Event() : _state{State::not_set} {}
 
-    awaitable<void> wait(any_io_executor executor) {
+    [[nodiscard]] awaitable<void> wait(any_io_executor executor) {
         auto initiate = [this, executor]<typename Handler>(Handler&& handler) mutable
         {
             this->_handler = [executor, handler = std::forward<Handler>(handler)]() mutable {
