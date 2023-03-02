@@ -7,13 +7,13 @@ namespace boost::asio::awaitable_ext {
 class Event
 {
     enum class State { not_set, not_set_consumer_waiting, set };
-    std::atomic<State> _state;
-    std::move_only_function<void()> _handler;
+    mutable std::atomic<State> _state;
+    mutable std::move_only_function<void()> _handler;
 
 public:
     Event() : _state{State::not_set} {}
 
-    [[nodiscard]] awaitable<void> wait(any_io_executor executor) {
+    [[nodiscard]] awaitable<void> wait(any_io_executor executor) const {
         auto initiate = [this, executor]<typename Handler>(Handler&& handler) mutable
         {
             this->_handler = [executor, handler = std::forward<Handler>(handler)]() mutable {
