@@ -41,7 +41,13 @@ SingleProducerSequencer<TSequence, Traits>::SingleProducerSequencer(const Sequen
     _nextToClaim{initialSequence + 1},
     _producerBarrier{initialSequence}
 {
+    // bufferSize must be a positive power-of-two
     assert(bufferSize > 0 && (bufferSize & (bufferSize - 1)) == 0);
+    // but must be no larger than the max diff value.
+    using diff_t = typename Traits::difference_type;
+    using unsigned_diff_t = std::make_unsigned_t<diff_t>;
+    constexpr unsigned_diff_t maxSize = static_cast<unsigned_diff_t>(std::numeric_limits<diff_t>::max());
+    assert(bufferSize <= maxSize);
 }
 
 template<std::unsigned_integral TSequence, typename Traits>
