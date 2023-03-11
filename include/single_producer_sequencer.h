@@ -40,7 +40,9 @@ SingleProducerSequencer<TSequence, Traits>::SingleProducerSequencer(const Sequen
     _bufferSize{bufferSize},
     _nextToClaim{initialSequence + 1},
     _producerBarrier{initialSequence}
-{}
+{
+    assert(bufferSize > 0 && (bufferSize & (bufferSize - 1)) == 0);
+}
 
 template<std::unsigned_integral TSequence, typename Traits>
 awaitable<TSequence> SingleProducerSequencer<TSequence, Traits>::claim_one()
