@@ -5,7 +5,7 @@ Additional synchronization primitives for [boost::asio::awaitable](https://www.b
 # Requirements
  * C++23 complier (GCC 12)
  * CMake
- * Conan
+ * Conan 1.x
 
 # Build and tests
 ```sh
