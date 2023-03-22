@@ -42,9 +42,13 @@ public:
     SequenceBarrier(TSequence initialSequence = Traits::initial_sequence);
     ~SequenceBarrier();
 
+    SequenceBarrier(const SequenceBarrier&) = delete;
+    SequenceBarrier& operator=(const SequenceBarrier&) = delete;
+
     TSequence last_published() const;
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence) const;
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence, any_io_executor) const;
+
     void publish(TSequence);
 
 protected:

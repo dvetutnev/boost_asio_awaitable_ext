@@ -14,6 +14,9 @@ public:
                             std::size_t bufferSize,
                             TSequence initialSequence = Traits::initial_sequence);
 
+    SingleProducerSequencer(const SingleProducerSequencer&) = delete;
+    SingleProducerSequencer& operator=(const SingleProducerSequencer&) = delete;
+
     [[nodiscard]] awaitable<TSequence> claim_one();
     [[nodiscard]] awaitable<SequenceRange<TSequence, Traits>> claim_up_to(std::size_t);
     void publish(TSequence);

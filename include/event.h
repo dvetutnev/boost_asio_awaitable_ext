@@ -13,6 +13,9 @@ class Event
 public:
     Event() : _state{State::not_set} {}
 
+    Event(const Event&) = delete;
+    Event& operator=(const Event&) = delete;
+
     [[nodiscard]] awaitable<void> wait(any_io_executor executor) const {
         auto initiate = [this, executor]<typename Handler>(Handler&& handler) mutable
         {

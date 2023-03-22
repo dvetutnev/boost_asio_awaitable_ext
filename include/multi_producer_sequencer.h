@@ -13,6 +13,9 @@ public:
                            std::size_t bufferSize,
                            TSequence initialSequence = Traits::initial_sequence);
 
+    MultiProducerSequencer(const MultiProducerSequencer&) = delete;
+    MultiProducerSequencer& operator=(const MultiProducerSequencer&) = delete;
+
     std::size_t buffer_size() const noexcept { return _indexMask + 1; };
 
 
