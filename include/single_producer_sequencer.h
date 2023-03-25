@@ -5,12 +5,18 @@
 
 namespace boost::asio::awaitable_ext {
 
+template<typename Barrier, typename TSequence>
+concept IsSequenceBarrier = requires(Barrier b, TSequence s) {
+    { b.wait_until_published(s) } -> std::same_as<awaitable<TSequence>>;
+};
+
 template<std::unsigned_integral TSequence = std::size_t,
-         typename Traits = SequenceTraits<TSequence>>
+         typename Traits = SequenceTraits<TSequence>,
+         IsSequenceBarrier<TSequence> ConsumerBarrier = SequenceBarrier<TSequence, Traits>>
 class SingleProducerSequencer
 {
 public:
-    SingleProducerSequencer(const SequenceBarrier<TSequence, Traits>& consumerBarrier,
+    SingleProducerSequencer(const ConsumerBarrier& consumerBarrier,
                             std::size_t bufferSize,
                             TSequence initialSequence = Traits::initial_sequence);
 
@@ -26,7 +32,7 @@ public:
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence) const;
 
 private:
-    const SequenceBarrier<TSequence, Traits>& _consumerBarrier;
+    const ConsumerBarrier& _consumerBarrier;
     const std::size_t _bufferSize;
 
     TSequence _nextToClaim;
@@ -34,10 +40,10 @@ private:
     SequenceBarrier<TSequence, Traits> _producerBarrier;
 };
 
-template<std::unsigned_integral TSequence, typename Traits>
-SingleProducerSequencer<TSequence, Traits>::SingleProducerSequencer(const SequenceBarrier<TSequence, Traits>& consumerBarrier,
-                                                                    std::size_t bufferSize,
-                                                                    TSequence initialSequence)
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::SingleProducerSequencer(const ConsumerBarrier& consumerBarrier,
+                                                                                     std::size_t bufferSize,
+                                                                                     TSequence initialSequence)
     :
     _consumerBarrier{consumerBarrier},
     _bufferSize{bufferSize},
@@ -53,16 +59,16 @@ SingleProducerSequencer<TSequence, Traits>::SingleProducerSequencer(const Sequen
     assert(bufferSize <= maxSize);
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-awaitable<TSequence> SingleProducerSequencer<TSequence, Traits>::claim_one()
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+awaitable<TSequence> SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::claim_one()
 {
     const auto nextToWrite = static_cast<TSequence>(_nextToClaim - _bufferSize);
     co_await _consumerBarrier.wait_until_published(nextToWrite);
     co_return _nextToClaim++;
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-awaitable<SequenceRange<TSequence, Traits>> SingleProducerSequencer<TSequence, Traits>::claim_up_to(std::size_t count)
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+awaitable<SequenceRange<TSequence, Traits>> SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::claim_up_to(std::size_t count)
 {
     const auto nextToWrite = static_cast<TSequence>(_nextToClaim - _bufferSize);
     const TSequence lastAvailableSequence =
@@ -77,26 +83,26 @@ awaitable<SequenceRange<TSequence, Traits>> SingleProducerSequencer<TSequence, T
     co_return SequenceRange<TSequence, Traits>{begin, end};
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-void SingleProducerSequencer<TSequence, Traits>::publish(TSequence sequence)
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+void SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::publish(TSequence sequence)
 {
     _producerBarrier.publish(sequence);
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-void SingleProducerSequencer<TSequence, Traits>::publish(const SequenceRange<TSequence, Traits>& range)
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+void SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::publish(const SequenceRange<TSequence, Traits>& range)
 {
     publish(range.back());
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-TSequence SingleProducerSequencer<TSequence, Traits>::last_published() const
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+TSequence SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::last_published() const
 {
     return _producerBarrier.last_published();
 }
 
-template<std::unsigned_integral TSequence, typename Traits>
-awaitable<TSequence> SingleProducerSequencer<TSequence, Traits>::wait_until_published(TSequence sequence) const
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+awaitable<TSequence> SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::wait_until_published(TSequence sequence) const
 {
     co_return co_await _producerBarrier.wait_until_published(sequence);
 }
