@@ -20,7 +20,7 @@ BOOST_AUTO_TEST_CASE(claim_one)
 
     auto producer = [&](SingleProducerSequencer<std::size_t>& sequencer) -> awaitable<void>
     {
-        for (std::size_t i = 1; i < iterationCount; i++)
+        for (std::size_t i = 1; i <= iterationCount; i++)
         {
             auto seq = co_await sequencer.claim_one();
             buffer[seq & indexMask] = i;
@@ -70,7 +70,7 @@ BOOST_AUTO_TEST_CASE(claim_one)
 
     constexpr std::uint64_t expectedResult =
         static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
-
+    BOOST_TEST(result == expectedResult);
 }
 
 BOOST_AUTO_TEST_CASE(claim_up_to)
@@ -139,7 +139,7 @@ BOOST_AUTO_TEST_CASE(claim_up_to)
 
     constexpr std::uint64_t expectedResult =
         static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
-
+    BOOST_TEST(result == expectedResult);
 }
 
 BOOST_AUTO_TEST_SUITE_END();
