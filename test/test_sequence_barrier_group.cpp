@@ -250,6 +250,86 @@ BOOST_AUTO_TEST_CASE(parallel)
     BOOST_TEST(result2 == expectedResult);
 }
 
+BOOST_AUTO_TEST_CASE(unique)
+{
+    constexpr std::size_t bufferSize = 256;
+    constexpr std::size_t indexMask = bufferSize - 1;
+    std::uint64_t buffer[bufferSize];
+
+    constexpr std::size_t iterationCount = 1'000'000;
+
+    using Sequencer = SingleProducerSequencer<std::size_t, SequenceTraits<std::size_t>, SequenceBarrierGroup<std::size_t>>;
+
+    auto producer = [&](Sequencer& sequencer, unsigned consumerCount) -> awaitable<void>
+    {
+        constexpr std::size_t maxBatchSize = 10;
+
+        std::size_t i = 0;
+        while (i < iterationCount)
+        {
+            std::size_t batchSize = std::min(maxBatchSize, iterationCount - i);
+            auto range = co_await sequencer.claim_up_to(batchSize);
+            for (auto seq : range) {
+                buffer[seq & indexMask] = ++i;
+            }
+            sequencer.publish(range);
+        }
+
+        while (consumerCount--)
+        {
+            auto finalSeq = co_await sequencer.claim_one();
+            buffer[finalSeq & indexMask] = 0;
+            sequencer.publish(finalSeq);
+        };
+
+        co_return;
+    };
+
+    auto consumer = [&](const Sequencer& sequencer,
+                        SequenceBarrier<std::size_t>& consumerBarrier,
+                        std::atomic_size_t& nextToRead,
+                        std::size_t& result) -> awaitable<void>
+    {
+        bool reachedEnd = false;
+        do {
+            std::size_t toRead = nextToRead.fetch_add(1);
+            co_await sequencer.wait_until_published(toRead);
+            result += buffer[toRead & indexMask];
+
+            // Zero value is sentinel that indicates the end of the stream.
+            reachedEnd = buffer[toRead & indexMask] == 0;
+
+            // Notify that we've finished processing up to 'available'.
+            consumerBarrier.publish(toRead);
+
+        } while (!reachedEnd);
+
+        co_return;
+    };
+
+    SequenceBarrier<std::size_t> barrier1, barrier2;
+    SequenceBarrierGroup<std::size_t> barrierGroup{{barrier1, barrier2}};
+    Sequencer sequencer{barrierGroup, bufferSize};
+
+    std::atomic_size_t nextToRead{0};
+
+    std::size_t result1 = 0;
+    std::size_t result2 = 0;
+
+    thread_pool tp{3};
+    any_io_executor executorA = tp.get_executor();
+    any_io_executor executorB = tp.get_executor();
+    any_io_executor executorC = tp.get_executor();
+    co_spawn(executorA, consumer(sequencer, barrier1, nextToRead, result1), detached);
+    co_spawn(executorB, consumer(sequencer, barrier2, nextToRead, result2), detached);
+    co_spawn(executorC, producer(sequencer, 2), detached);
+    tp.join();
+
+    constexpr std::uint64_t expectedResult =
+        static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
+    BOOST_TEST(result1 + result2 == expectedResult);
+}
+
 BOOST_AUTO_TEST_SUITE_END();
 
 } // namespace boost::asio::awaitable_ext::test
