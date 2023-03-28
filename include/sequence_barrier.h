@@ -225,7 +225,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
             {
                 *awaitersToRequeueTail = awaiters;
                 awaitersToRequeueTail = &(awaiters->next);
-                minDiff = diff < minDiff ? diff : minDiff;
+                minDiff = std::min(diff, minDiff);
             }
             else
             {
