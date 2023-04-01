@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Temporary compatibility for Clang 14
+# Temporary compatibility for Clang
 add_compile_options("-std=c++2b")
 #set(CMAKE_CXX_STANDARD 23)
 #set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -9,12 +9,12 @@ namespace boost::asio::awaitable_ext {
 
 namespace detail {
 template<std::unsigned_integral TSequence, typename Traits>
-struct Awaiter
+struct SequenceBarrierAwaiter
 {
     const TSequence targetSequence;
-    Awaiter* next;
+    SequenceBarrierAwaiter* next;
 
-    explicit Awaiter(TSequence s) : targetSequence{s}, next{nullptr} {}
+    explicit SequenceBarrierAwaiter(TSequence s) : targetSequence{s}, next{nullptr} {}
 
     awaitable<TSequence> wait(any_io_executor executor) const {
         co_await _event.wait(executor);
@@ -35,7 +35,7 @@ private:
 
 template<std::unsigned_integral TSequence = std::size_t,
          typename Traits = SequenceTraits<TSequence>,
-         typename Awaiter = detail::Awaiter<TSequence, Traits>>
+         typename Awaiter = detail::SequenceBarrierAwaiter<TSequence, Traits>>
 class SequenceBarrier
 {
 public:
@@ -250,7 +250,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
     // Resume the awaiters that are ready
     while (awaitersToResume != nullptr)
     {
-        auto* next = awaitersToResume->next;
+        Awaiter* next = awaitersToResume->next;
         awaitersToResume->resume(lastKnownPublished);
         awaitersToResume = next;
     }

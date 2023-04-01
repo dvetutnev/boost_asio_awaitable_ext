@@ -1,14 +1,10 @@
 #pragma once
 
-#include "sequence_barrier.h"
 #include "sequence_range.h"
+#include "sequence_barrier.h"
+#include "is_sequence_barrier.h"
 
 namespace boost::asio::awaitable_ext {
-
-template<typename Barrier, typename TSequence>
-concept IsSequenceBarrier = requires(Barrier b, TSequence s) {
-    { b.wait_until_published(s) } -> std::same_as<awaitable<TSequence>>;
-};
 
 template<std::unsigned_integral TSequence = std::size_t,
          typename Traits = SequenceTraits<TSequence>,
@@ -92,6 +88,7 @@ void SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::publish(TSeque
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
 void SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::publish(const SequenceRange<TSequence, Traits>& range)
 {
+    assert(!range.empty());
     publish(range.back());
 }
 
