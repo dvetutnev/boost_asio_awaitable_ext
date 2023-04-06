@@ -381,21 +381,26 @@ BOOST_AUTO_TEST_SUITE_END() // two_consumers_parallel
 BOOST_AUTO_TEST_SUITE(two_consumers_unique)
 
 namespace {
-template<typename Sequencer>
-awaitable<std::uint64_t> consumer_unique(const Sequencer& sequencer,
+awaitable<std::uint64_t> consumer_unique(const MultiProducerSequencer<std::size_t, SequenceTraits<std::size_t>, SequenceBarrierGroup<std::size_t>>& sequencer,
                                          SequenceBarrier<std::size_t>& readBarrier,
                                          const std::uint64_t buffer[],
                                          std::atomic_size_t& nextToRead) {
 
+    using Traits = SequenceTraits<std::size_t>;
     const std::size_t indexMask = sequencer.buffer_size() - 1;
 
     std::uint64_t sum = 0;
 
     bool reachedEnd = false;
-    std::size_t lastKnownPublished = static_cast<std::size_t>(nextToRead - 1);
+    std::size_t lastKnownPublished = Traits::initial_sequence;
     do
     {
         std::size_t toRead = nextToRead.fetch_add(1);
+        if (Traits::difference(toRead, lastKnownPublished) >= sequencer.buffer_size()) {
+            // Move consumer barrier if retarded
+            readBarrier.publish(toRead - 1);
+        }
+
         std::size_t available = co_await sequencer.wait_until_published(toRead, lastKnownPublished);
         sum += buffer[toRead & indexMask];
 
@@ -403,9 +408,8 @@ awaitable<std::uint64_t> consumer_unique(const Sequencer& sequencer,
         reachedEnd = buffer[toRead & indexMask] == 0;
 
         // Notify that we've finished processing up to 'available'.
-        lastKnownPublished = toRead;
         readBarrier.publish(toRead);
-
+        lastKnownPublished = available;
     } while (!reachedEnd);
 
     co_return sum;
@@ -435,7 +439,6 @@ BOOST_AUTO_TEST_CASE(two_producer_single)
     co_spawn(executorB, one_at_a_time_producer(sequencer, buffer, iterationCount), detached);
 
     std::atomic_size_t nextToRead = 0;
-//    std::uint64_t result1; std::uint64_t result2 = 0;
     std::uint64_t result1, result2;
     co_spawn(executorC, consumer_unique(sequencer, readBarrier1, buffer, nextToRead),
              [&](std::exception_ptr, std::uint64_t val) { result1 = val; } );

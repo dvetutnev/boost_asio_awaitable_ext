@@ -9,7 +9,7 @@
 #include <boost/asio/thread_pool.hpp>
 
 #include <boost/test/unit_test.hpp>
-
+#include <thread>
 namespace boost::asio::awaitable_ext::test {
 
 BOOST_AUTO_TEST_SUITE(tests_SequenceBarrierGroup);
@@ -258,7 +258,8 @@ BOOST_AUTO_TEST_CASE(unique)
 
     constexpr std::size_t iterationCount = 1'000'000;
 
-    using Sequencer = SingleProducerSequencer<std::size_t, SequenceTraits<std::size_t>, SequenceBarrierGroup<std::size_t>>;
+    using Traits = SequenceTraits<std::size_t>;
+    using Sequencer = SingleProducerSequencer<std::size_t, Traits, SequenceBarrierGroup<std::size_t>>;
 
     auto producer = [&](Sequencer& sequencer, unsigned consumerCount) -> awaitable<void>
     {
@@ -286,13 +287,21 @@ BOOST_AUTO_TEST_CASE(unique)
     };
 
     auto consumer = [&](const Sequencer& sequencer,
-                        SequenceBarrier<std::size_t>& consumerBarrier,
+                        SequenceBarrier<std::size_t>& readBarrier,
                         std::atomic_size_t& nextToRead,
                         std::size_t& result) -> awaitable<void>
     {
         bool reachedEnd = false;
-        do {
+        std::size_t lastKnownPublished = Traits::initial_sequence;
+        do
+        {
             std::size_t toRead = nextToRead.fetch_add(1);
+            if (Traits::difference(toRead, lastKnownPublished) >= bufferSize)
+            {
+                // Move consumer barrier if retarded
+                readBarrier.publish(toRead - 1);
+            }
+
             co_await sequencer.wait_until_published(toRead);
             result += buffer[toRead & indexMask];
 
@@ -300,8 +309,8 @@ BOOST_AUTO_TEST_CASE(unique)
             reachedEnd = buffer[toRead & indexMask] == 0;
 
             // Notify that we've finished processing up to 'available'.
-            consumerBarrier.publish(toRead);
-
+            readBarrier.publish(toRead);
+            lastKnownPublished = toRead;
         } while (!reachedEnd);
 
         co_return;
