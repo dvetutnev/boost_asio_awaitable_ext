@@ -129,6 +129,8 @@ private:
     mutable std::atomic<Awaiter*> _awaiters;
 
     void resume_ready_awaiters();
+
+protected:
     void add_awaiter(Awaiter*) const;
 };
 

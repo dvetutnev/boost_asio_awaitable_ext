@@ -284,23 +284,23 @@ BOOST_AUTO_TEST_CASE_TEMPLATE(tsan, T, SequenceTypesTSan)
     };
     Barrier barrier;
 
-    constexpr std::size_t countAwaiters = std::numeric_limits<T>::max() + 1;
-    constexpr T quater = std::numeric_limits<T>::max() / 4;
-
+    std::atomic_bool producerDone = false;
     MockAwaitersStorage<T> awaiters;
 
     auto consumer = [&, previos = T{}] mutable
     {
         for (;;)
         {
-            const T lastPublished = barrier.last_published();
-            if (lastPublished == 0) {
+            if (producerDone.load(std::memory_order_acquire)) {
                 break;
             }
+            const T lastPublished = barrier.last_published();
             if (lastPublished == previos) {
                 continue;
             }
             previos = lastPublished;
+
+            constexpr T quater = std::numeric_limits<T>::max() / 4;
 
             if (auto* awaiter = awaiters.get_upper(lastPublished + quater); awaiter != nullptr) {
                 barrier.add_awaiter(awaiter);
@@ -313,15 +313,12 @@ BOOST_AUTO_TEST_CASE_TEMPLATE(tsan, T, SequenceTypesTSan)
 
     auto producer = [&]()
     {
-        for (T i = 1; ; i++) {
+        for (std::size_t i = 0; i <= std::numeric_limits<T>::max(); i++) {
             barrier.publish(i);
-            if (i == 0) {
-                break;
-            }
         }
-
+        producerDone.store(true, std::memory_order_release);
         // Resume remaining awaiters
-        for (std::size_t i = 0; i < countAwaiters; i++) {
+        for (std::size_t i = 0; i <= std::numeric_limits<T>::max(); i++) {
             barrier.publish(i);
         }
     };
