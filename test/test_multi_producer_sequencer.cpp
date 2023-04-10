@@ -392,7 +392,7 @@ awaitable<std::uint64_t> consumer_unique(const MultiProducerSequencer<std::size_
     std::uint64_t sum = 0;
 
     bool reachedEnd = false;
-    std::size_t lastKnownPublished = Traits::initial_sequence;
+    std::size_t lastKnownPublished = readBarrier.last_published();
     do
     {
         std::size_t toRead = nextToRead.fetch_add(1);

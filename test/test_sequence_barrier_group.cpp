@@ -292,7 +292,7 @@ BOOST_AUTO_TEST_CASE(unique)
                         std::size_t& result) -> awaitable<void>
     {
         bool reachedEnd = false;
-        std::size_t lastKnownPublished = Traits::initial_sequence;
+        std::size_t lastKnownPublished = readBarrier.last_published();
         do
         {
             std::size_t toRead = nextToRead.fetch_add(1);
