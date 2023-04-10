@@ -214,7 +214,7 @@ awaitable<SequenceRange<TSequence, Traits>> MultiProducerSequencer<TSequence, Tr
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>
 void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::publish(TSequence sequence)
 {
-    _published[sequence & _indexMask].store(sequence);
+    _published[sequence & _indexMask].store(sequence, std::memory_order_seq_cst);
     resume_ready_awaiters();
 }
 
