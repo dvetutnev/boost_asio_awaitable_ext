@@ -12,11 +12,6 @@ detect_project_name(project_name)
 message(STATUS "Project name: ${project_name}")
 project(${project_name} CXX)
 
-include(conan)
-conan_cmake_autodetect(settings)
-conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt BUILD
-                    missing SETTINGS ${settings})
-
 add_compile_definitions(BOOST_ASIO_HAS_CO_AWAIT=1)
 
 find_package(Boost REQUIRED)

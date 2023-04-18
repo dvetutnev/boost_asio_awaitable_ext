@@ -36,4 +36,4 @@
 
 # IDEs
 CMakeLists.txt.user
-
+CMakeUserPresets.json
