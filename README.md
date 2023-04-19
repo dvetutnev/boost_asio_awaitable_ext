@@ -1,6 +1,8 @@
 # boost_asio_awaitable_ext
 
-Additional synchronization primitives for [boost::asio::awaitable](https://www.boost.org/doc/libs/1_79_0/doc/html/boost_asio/reference/awaitable.html) [coroutines](https://www.boost.org/doc/libs/1_79_0/doc/html/boost_asio/overview/composition/cpp20_coroutines.html)
+Additional synchronization primitives for [boost::asio::awaitable](https://www.boost.org/doc/libs/1_81_0/doc/html/boost_asio/reference/awaitable.html) [coroutines](https://www.boost.org/doc/libs/1_81_0/doc/html/boost_asio/overview/composition/cpp20_coroutines.html)
+
+Based on [cppcoro](https://github.com/lewissbaker/cppcoro)
 
 # Requirements
  * C++23 complier (GCC 12)
