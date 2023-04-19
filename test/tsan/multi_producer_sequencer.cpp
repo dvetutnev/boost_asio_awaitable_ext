@@ -148,7 +148,7 @@ BOOST_AUTO_TEST_CASE(_MultiProducerSequencer)
     readBarrierGroup.add(readBarrier1); readBarrierGroup.add(readBarrier2);
     std::uint64_t result1 = 0, result2 = 0;
 
-    thread_pool tp{3};
+    thread_pool tp{4};
     any_io_executor executorA = tp.get_executor();
     any_io_executor executorB = tp.get_executor();
     any_io_executor executorC = tp.get_executor();
