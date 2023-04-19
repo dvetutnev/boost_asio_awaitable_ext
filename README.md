@@ -29,7 +29,7 @@ os=Linux
 
 Install deps
 ```bash
-conan install -s build_type=Debug -s compiler.cppstd=23 -of build --build missing conanfile.txt
+conan install -s build_type=Debug -of build --build missing conanfile.py
 ```
 
 Build and tests
