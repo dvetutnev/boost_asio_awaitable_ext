@@ -14,7 +14,7 @@ project(${project_name} CXX)
 
 add_compile_definitions(BOOST_ASIO_HAS_CO_AWAIT=1)
 
-find_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS unit_test_framework)
 
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE include)
