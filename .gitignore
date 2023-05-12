@@ -1,5 +1,5 @@
 /build*
-/env/
+/venv/
 
 # Prerequisites
 *.d
