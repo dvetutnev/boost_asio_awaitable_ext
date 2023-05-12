@@ -171,7 +171,7 @@ template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TS
 TSequence MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::last_published_after(TSequence lastKnownPublished) const
 {
     TSequence seq = lastKnownPublished + 1;
-    while (_published[seq & _indexMask].load() == seq) {
+    while (_published[seq & _indexMask].load(std::memory_order_acquire) == seq) {
         lastKnownPublished = seq++;
     }
     return lastKnownPublished;
