@@ -8,7 +8,6 @@ in
     name = "nix-shell";
     packages = with pkgs; [
       gdb
-      clang-tools_16
       cmake-format
     ];
     inputsFrom = [
