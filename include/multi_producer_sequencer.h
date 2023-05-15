@@ -22,8 +22,8 @@ struct MultiProducerSequencerAwaiter
         next{nullptr}
     {}
 
-    awaitable<TSequence> wait(any_io_executor executor) const {
-        co_await _event.wait(executor);
+    awaitable<TSequence> wait() const {
+        co_await _event.wait(use_awaitable);
         co_return lastKnownPublished;
     }
 
@@ -183,7 +183,7 @@ awaitable<TSequence> MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, 
 {
     auto awaiter = Awaiter{targetSequence, lastKnownPublished};
     add_awaiter(&awaiter);
-    TSequence available = co_await awaiter.wait(co_await this_coro::executor);
+    TSequence available = co_await awaiter.wait();
     co_return available;
 }
 

@@ -53,7 +53,7 @@ struct Sequencer : BaseSequencer
 };
 } // Anonymous namespace
 
-BOOST_AUTO_TEST_CASE(_MultiProducerSequencer)
+BOOST_AUTO_TEST_CASE(MultiProducerSequencer_)
 {
     constexpr std::size_t bufferSize = 1024;
     constexpr std::size_t indexMask = bufferSize - 1;

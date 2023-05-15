@@ -3,6 +3,9 @@
 #include "event.h"
 #include "sequence_traits.h"
 
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/use_awaitable.hpp>
+
 #include <concepts>
 
 namespace boost::asio::awaitable_ext {
@@ -16,8 +19,8 @@ struct SequenceBarrierAwaiter
 
     explicit SequenceBarrierAwaiter(TSequence s) : targetSequence{s}, next{nullptr} {}
 
-    awaitable<TSequence> wait(any_io_executor executor) const {
-        co_await _event.wait(executor);
+    awaitable<TSequence> wait() const {
+        co_await _event.wait(use_awaitable);
         co_return _published;
     }
 
@@ -81,13 +84,6 @@ TSequence SequenceBarrier<TSequence, Traits, Awaiter>::last_published() const
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
 awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence) const
 {
-    any_io_executor executor = co_await this_coro::executor;
-    co_return co_await wait_until_published(targetSequence, executor);
-}
-
-template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
-awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_published(TSequence targetSequence, any_io_executor executor) const
-{
     TSequence lastPublished = last_published();
     if (!Traits::precedes(lastPublished, targetSequence)) {
         co_return lastPublished;
@@ -95,7 +91,7 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_pub
 
     auto awaiter = Awaiter{targetSequence};
     add_awaiter(&awaiter);
-    lastPublished = co_await awaiter.wait(executor);
+    lastPublished = co_await awaiter.wait();
     co_return lastPublished;
 }
 

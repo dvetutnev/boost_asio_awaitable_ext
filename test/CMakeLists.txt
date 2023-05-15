@@ -1,6 +1,6 @@
 add_executable(
   tests
-  test_timer.cpp
+  test_examples.cpp
   test_schedule.cpp
   test_event.cpp
   test_sequence_traits.cpp

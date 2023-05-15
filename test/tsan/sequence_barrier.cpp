@@ -11,7 +11,7 @@ namespace boost::asio::awaitable_ext::test {
 using SequenceTypes = boost::mpl::list<std::uint8_t,
                                        std::uint16_t>;
 
-BOOST_AUTO_TEST_CASE_TEMPLATE(_SequenceBarrier, T, SequenceTypes)
+BOOST_AUTO_TEST_CASE_TEMPLATE(SequenceBarrier_, T, SequenceTypes)
 {
     using BaseBarrier = SequenceBarrier<T, SequenceTraits<T>, MockAwaiter<T>>;
     struct Barrier : BaseBarrier

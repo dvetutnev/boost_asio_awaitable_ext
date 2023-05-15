@@ -1,16 +1,20 @@
 #include "event.h"
 #include "schedule.h"
+#include "async_sleep.h"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
-#include <boost/asio/thread_pool.hpp>
 
 #include <boost/test/unit_test.hpp>
 
-#include <thread>
+#include <chrono>
 
 namespace boost::asio::awaitable_ext::test {
+
+using namespace std::chrono_literals;
+using namespace experimental::awaitable_operators;
 
 BOOST_AUTO_TEST_SUITE(tests_Event);
 
@@ -23,8 +27,7 @@ BOOST_AUTO_TEST_CASE(simple)
     auto consumer = [&]() -> awaitable<void> {
         reachedPointA = true;
 
-        any_io_executor executor = co_await this_coro::executor;
-        co_await event.wait(executor);
+        co_await event.wait(use_awaitable);
 
         reachedPointB = true;
         co_return;
@@ -34,8 +37,7 @@ BOOST_AUTO_TEST_CASE(simple)
         BOOST_TEST(reachedPointA);
         BOOST_TEST(!reachedPointB);
 
-        any_io_executor executor = co_await this_coro::executor;
-        co_await schedule(executor);
+        co_await schedule(co_await this_coro::executor);
 
         BOOST_TEST(reachedPointA);
         BOOST_TEST(!reachedPointB);
@@ -44,14 +46,9 @@ BOOST_AUTO_TEST_CASE(simple)
         co_return;
     };
 
-    auto main = [&]() -> awaitable<void> {
-        using namespace experimental::awaitable_operators;
-        co_await(consumer() && producer());
-        co_return;
-    };
-
     io_context ioContext;
-    co_spawn(ioContext, main(), detached);
+    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
@@ -69,8 +66,7 @@ BOOST_AUTO_TEST_CASE(set_before_wait)
     auto consumer = [&]() -> awaitable<void> {
         reachedPointA = true;
 
-        any_io_executor executor = co_await this_coro::executor;
-        co_await event.wait(executor);
+        co_await event.wait(use_awaitable);
 
         reachedPointB = true;
         co_return;
@@ -82,57 +78,116 @@ BOOST_AUTO_TEST_CASE(set_before_wait)
         co_return;
     };
 
-    auto main = [&]() -> awaitable<void> {
-        using namespace experimental::awaitable_operators;
-        co_await(consumer() && producer());
-        co_return;
-    };
-
     io_context ioContext;
-    co_spawn(ioContext, main(), detached);
+    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
     BOOST_TEST(reachedPointB);
 }
 
-namespace {
-void multithread_test_func(std::size_t count) {
-    thread_pool tp{2};
-    any_io_executor executorA = tp.get_executor();
-    any_io_executor executorB = tp.get_executor();
+BOOST_AUTO_TEST_CASE(cancel)
+{
+    bool reachedPointA = false;
+    bool reachedPointB = false;
+    Event event;
 
-    for (std::size_t i = 0; i < count; i++)
-    {
-        Event event;
-        std::atomic_bool consumerDone{false};
-        std::atomic_bool producerDone{false};
-
-        auto consumer = [&]() -> awaitable<void> {
-            co_await event.wait(co_await this_coro::executor);
-            consumerDone.store(true);
-            co_return;
-        };
-
-        auto producer = [&]() -> awaitable<void> {
-            event.set();
-            producerDone.store(true);
-            co_return;
-        };
-
-        co_spawn((i % 2) ? executorA : executorB, consumer(), detached);
-        co_spawn((i % 2) ? executorB : executorA, producer(), detached);
-
-        while (!consumerDone.load() || !producerDone.load())
-            ;
+    auto consumer = [&]() -> awaitable<void> {
+        reachedPointA = true;
+        auto [ec] = co_await event.wait(as_tuple(use_awaitable)); // -> std::tuple<boost::system::error_code>
+        BOOST_TEST(ec == error::operation_aborted);
+        reachedPointB = true;
     };
 
-    tp.join();
-}
-} // Anonymous namespace
+    auto producer = [&]() -> awaitable<void> {
+        BOOST_TEST(reachedPointA);
+        BOOST_TEST(!reachedPointB);
+        co_await async_sleep(100ms);
+        event.set();
+    };
 
-BOOST_AUTO_TEST_CASE(multithread_1) { multithread_test_func(1); }
-BOOST_AUTO_TEST_CASE(multithread_10k) { multithread_test_func(10'000); }
+    auto timeout = [&]() -> awaitable<void> {
+        co_await async_sleep(50ms);
+        event.cancel();
+    };
+
+    io_context ioContext;
+    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, timeout(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    ioContext.run();
+
+    BOOST_TEST(reachedPointA);
+    BOOST_TEST(reachedPointB);
+}
+
+BOOST_AUTO_TEST_CASE(cancel_before_wait)
+{
+    bool reachedPointA = false;
+    bool reachedPointB = false;
+    Event event;
+
+    event.cancel();
+
+    auto consumer = [&]() -> awaitable<void> {
+        reachedPointA = true;
+        auto [ec] = co_await event.wait(as_tuple(use_awaitable)); // -> std::tuple<boost::system::error_code>
+        BOOST_TEST(ec == error::operation_aborted);
+        reachedPointB = true;
+    };
+
+    auto producer = [&]() -> awaitable<void> {
+        BOOST_TEST(reachedPointA);
+        BOOST_TEST(!reachedPointB);
+        co_return;
+    };
+
+    io_context ioContext;
+    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    ioContext.run();
+
+    BOOST_TEST(reachedPointA);
+    BOOST_TEST(reachedPointB);
+}
+
+BOOST_AUTO_TEST_CASE(install_cancellation_slot)
+{
+    Event event;
+
+    auto main = [&]() -> awaitable<void> {
+        auto result = co_await(
+            event.wait(use_awaitable) ||
+            async_sleep(50ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer first
+    };
+
+    io_context ioContext;
+    co_spawn(ioContext, main(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(cancel_example)
+{
+    Event event;
+
+    auto consumer = [&]() -> awaitable<void> {
+        auto [ec] = co_await event.wait(as_tuple(use_awaitable)); // -> std::tuple<boost::system::error_code>
+        BOOST_TEST(ec == error::operation_aborted);
+    };
+
+    auto timeout = [&]() -> awaitable<void> {
+        co_await async_sleep(50ms);
+        event.cancel();
+    };
+
+    io_context ioContext;
+    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, timeout(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    ioContext.run();
+}
 
 BOOST_AUTO_TEST_SUITE_END();
 
