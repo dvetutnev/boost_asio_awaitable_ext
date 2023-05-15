@@ -16,6 +16,8 @@ boost::asio::awaitable<void> timer(std::chrono::milliseconds duration) {
 };
 } // Anonymous namespace
 
+BOOST_AUTO_TEST_SUITE(tests_Examples);
+
 BOOST_AUTO_TEST_CASE(asio_system_timer)
 {
     boost::asio::io_context ioContext;
@@ -30,3 +32,5 @@ BOOST_AUTO_TEST_CASE(asio_system_timer)
     BOOST_TEST(duration >= 100ms);
     BOOST_TEST(duration <= 200ms);
 }
+
+BOOST_AUTO_TEST_SUITE_END();
