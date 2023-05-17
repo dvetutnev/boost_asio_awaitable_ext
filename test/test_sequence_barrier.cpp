@@ -1,5 +1,6 @@
 #include "sequence_barrier.h"
 #include "schedule.h"
+#include "async_sleep.h"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/detached.hpp>
@@ -15,11 +16,38 @@ using SequenceTypes = boost::mpl::list<std::uint8_t,
                                        std::uint16_t,
                                        std::uint32_t,
                                        std::size_t>;
+using namespace std::chrono_literals;
+using namespace experimental::awaitable_operators;
 
 BOOST_AUTO_TEST_SUITE(tests_SequenceBarrier);
 
 BOOST_AUTO_TEST_CASE_TEMPLATE(previous, T, SequenceTypes)
 {
+    SequenceBarrier<T> barrier;
+
+    auto main = [&]() -> awaitable<void> {
+        {
+            auto lastUntilPublish = co_await barrier.wait_until_published(std::numeric_limits<T>::max() / 2 + 1);
+            BOOST_TEST(lastUntilPublish == std::numeric_limits<T>::max());
+        }
+        {
+            auto lastUntilPublish = co_await barrier.wait_until_published(std::numeric_limits<T>::max() / 2 + 43);
+            BOOST_TEST(lastUntilPublish == std::numeric_limits<T>::max());
+        }
+        {
+            auto lastUntilPublish = co_await barrier.wait_until_published(std::numeric_limits<T>::max());
+            BOOST_TEST(lastUntilPublish == std::numeric_limits<T>::max());
+        }
+    };
+
+    io_context ioContext;
+    co_spawn(ioContext, main(), detached);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(previous_)
+{
+    using T = std::size_t;
     SequenceBarrier<T> barrier;
 
     auto main = [&]() -> awaitable<void> {
@@ -268,6 +296,55 @@ BOOST_AUTO_TEST_CASE(multithread)
         static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
 
     BOOST_TEST(result == expectedResult);
+}
+
+BOOST_AUTO_TEST_CASE(close)
+{
+    SequenceBarrier<std::size_t> barrier;
+    int count = 0;
+
+    auto consumer = [&](std::size_t targetSequence) -> awaitable<void> {
+        try {
+            co_await barrier.wait_until_published(targetSequence);
+            BOOST_FAIL("Exception not throwed");
+        } catch (const boost::system::system_error& ex) {
+            count++;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto close = [&]() -> awaitable<void> {
+        barrier.close();
+        co_return;
+    };
+
+    io_context ioContext;
+    co_spawn(ioContext, consumer(42), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, consumer(89), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, close(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    ioContext.run();
+
+    BOOST_TEST(count == 2);
+}
+
+BOOST_AUTO_TEST_CASE(install_cancellation_handler)
+{
+    auto main = [&]() -> awaitable<void>
+    {
+        SequenceBarrier<std::size_t> barrier;
+
+        auto result = co_await(
+            barrier.wait_until_published(11) ||
+            barrier.wait_until_published(22) ||
+            async_sleep(10ms)
+            );
+
+        BOOST_TEST(result.index() == 2); // timer win
+    };
+
+    io_context ioContext;
+    co_spawn(ioContext, main(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    ioContext.run();
 }
 
 BOOST_AUTO_TEST_SUITE_END();

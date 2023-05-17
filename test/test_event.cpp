@@ -152,7 +152,7 @@ BOOST_AUTO_TEST_CASE(cancel_before_wait)
     BOOST_TEST(reachedPointB);
 }
 
-BOOST_AUTO_TEST_CASE(install_cancellation_slot)
+BOOST_AUTO_TEST_CASE(install_cancellation_handler)
 {
     Event event;
 

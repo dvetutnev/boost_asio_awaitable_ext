@@ -5,6 +5,7 @@
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
 
 #include <concepts>
 
@@ -30,6 +31,8 @@ struct SequenceBarrierAwaiter
         _event.set();
     }
 
+    void cancel() { _event.cancel(); }
+
 private:
     Event _event;
     TSequence _published;
@@ -53,6 +56,7 @@ public:
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence, any_io_executor) const;
 
     void publish(TSequence);
+    void close();
 
 protected:
     void add_awaiter(Awaiter*) const;
@@ -60,13 +64,15 @@ protected:
 private:
     std::atomic<TSequence> _lastPublished;
     mutable std::atomic<Awaiter*> _awaiters;
+    std::atomic<bool> _isClosed;
 };
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
 SequenceBarrier<TSequence, Traits, Awaiter>::SequenceBarrier(TSequence initialSequence)
     :
     _lastPublished{initialSequence},
-    _awaiters{nullptr}
+    _awaiters{nullptr},
+    _isClosed{false}
 {}
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
@@ -89,9 +95,25 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_pub
         co_return lastPublished;
     }
 
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type){ const_cast<SequenceBarrier*>(this)->close(); });
+    }
+
     auto awaiter = Awaiter{targetSequence};
     add_awaiter(&awaiter);
-    lastPublished = co_await awaiter.wait();
+
+    // Spawn new coro-thread with dummy cancellation slot and co_await-ed its
+    // We explicit call event.close() from awaiter
+    lastPublished = co_await co_spawn(
+        co_await this_coro::executor,
+        awaiter.wait(),
+        bind_cancellation_slot(
+            cancellation_slot(),
+            use_awaitable)
+        );
+
     co_return lastPublished;
 }
 
@@ -149,7 +171,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
         while (!_awaiters.compare_exchange_weak(
             oldHead,
             awaitersToRequeue,
-            std::memory_order_release,
+            std::memory_order_seq_cst,
             std::memory_order_relaxed))
         {
             *awaitersToRequeueTail = oldHead;
@@ -161,6 +183,17 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
         Awaiter* next = awaitersToResume->next;
         awaitersToResume->resume(sequence);
         awaitersToResume = next;
+    }
+
+    if (_isClosed.load(std::memory_order_seq_cst))
+    {
+        awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
+        while (awaiters != nullptr)
+        {
+            Awaiter* next = awaiters->next;
+            awaiters->cancel();
+            awaiters = next;
+        }
     }
 }
 
@@ -174,6 +207,8 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
     TSequence lastKnownPublished;
     Awaiter* awaitersToResume;
     Awaiter** awaitersToResumeTail = &awaitersToResume;
+
+    bool isClosed = false;
 
     do
     {
@@ -197,7 +232,8 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
         // their write to m_lastPublished after enqueueing our awaiter, or they see our
         // write to m_awaiters after their write to m_lastPublished.
         lastKnownPublished = _lastPublished.load(std::memory_order_seq_cst);
-        if (Traits::precedes(lastKnownPublished, targetSequence))
+        isClosed = _isClosed.load(std::memory_order_seq_cst);
+        if (Traits::precedes(lastKnownPublished, targetSequence) && !isClosed)
         {
             // None of the the awaiters we enqueued have been satisfied yet.
             break;
@@ -238,7 +274,7 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
         // Calculate the earliest target sequence required by any of the awaiters to requeue.
         targetSequence = static_cast<TSequence>(lastKnownPublished + minDiff);
 
-    } while (awaitersToRequeue);
+    } while (awaitersToRequeue != nullptr && !isClosed);
 
     // Null-terminate the list of awaiters to resume
     *awaitersToResumeTail = nullptr;
@@ -249,6 +285,31 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
         Awaiter* next = awaitersToResume->next;
         awaitersToResume->resume(lastKnownPublished);
         awaitersToResume = next;
+    }
+
+    if (isClosed) {
+        while (awaitersToRequeue != nullptr)
+        {
+            Awaiter* next = awaitersToRequeue->next;
+            awaitersToRequeue->cancel();
+            awaitersToRequeue = next;
+        }
+    }
+}
+
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+void SequenceBarrier<TSequence, Traits, Awaiter>::close()
+{
+    const bool firstClosing = !_isClosed.exchange(true, std::memory_order_seq_cst);
+    if (firstClosing)
+    {
+        Awaiter* awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
+        while (awaiters != nullptr)
+        {
+            Awaiter* next = awaiters->next;
+            awaiters->cancel();
+            awaiters = next;
+        }
     }
 }
 

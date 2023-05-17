@@ -101,7 +101,7 @@ TSequence SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::last_publ
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
 awaitable<TSequence> SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::wait_until_published(TSequence sequence) const
 {
-    co_return co_await _producerBarrier.wait_until_published(sequence);
+    return _producerBarrier.wait_until_published(sequence);
 }
 
 } // namespace boost::asio::awaitable_ext

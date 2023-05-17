@@ -42,7 +42,7 @@ public:
                 oldState,
                 State::not_set_consumer_waiting,
                 std::memory_order_release,
-                std::memory_order_relaxed);
+                std::memory_order_acquire); // see side-effects from thread calling set()
 
             if (!isWaiting) {
                 auto ec = (oldState == State::canceled) ? system::error_code{error::operation_aborted}

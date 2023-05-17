@@ -88,27 +88,18 @@ void cancel_test(std::size_t count) {
 
         std::atomic_bool consumerDone{false}, producerDone{false}, cancelDone{false};
 
-        co_spawn((i % 2) ? executorA : executorB,
-                 consumer(),
-                 [&](std::exception_ptr ex)
-                 {
-                     if (ex) std::rethrow_exception(ex);
-                     consumerDone.store(true, std::memory_order_release);
-                 });
-        co_spawn((i % 2) ? executorB : executorA,
-                 producer(),
-                 [&](std::exception_ptr ex)
-                 {
-                     if (ex) std::rethrow_exception(ex);
-                     producerDone.store(true, std::memory_order_release);
-                 });
-        co_spawn(executorC,
-                 cancel(),
-                 [&](std::exception_ptr ex)
-                 {
-                     if (ex) std::rethrow_exception(ex);
-                     cancelDone.store(true, std::memory_order_release);
-                 });
+        auto handler = [](std::atomic_bool& flag)
+        {
+            return [&flag](std::exception_ptr ex)
+            {
+                if (ex) std::rethrow_exception(ex);
+                flag.store(true, std::memory_order_release);
+            };
+        };
+
+        co_spawn(executorA, consumer(), handler(consumerDone));
+        co_spawn((i % 2) ? executorB : executorC, producer(), handler(producerDone));
+        co_spawn((i % 2) ? executorC : executorB, cancel(), handler(cancelDone));
 
         while (!consumerDone.load(std::memory_order_acquire) ||
                !producerDone.load(std::memory_order_acquire) ||

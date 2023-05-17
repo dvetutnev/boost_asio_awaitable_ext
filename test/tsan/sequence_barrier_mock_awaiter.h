@@ -22,6 +22,7 @@ struct MockAwaiter
         next = nullptr;
         busy.store(false, std::memory_order_release); // Not use single total order
     }
+    void cancel() {}
 
 private:
     template<std::unsigned_integral, typename, typename>
