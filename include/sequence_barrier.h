@@ -300,16 +300,13 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
 void SequenceBarrier<TSequence, Traits, Awaiter>::close()
 {
-    const bool firstClosing = !_isClosed.exchange(true, std::memory_order_seq_cst);
-    if (firstClosing)
+    _isClosed.exchange(true, std::memory_order_seq_cst);
+    Awaiter* awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
+    while (awaiters != nullptr)
     {
-        Awaiter* awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
-        while (awaiters != nullptr)
-        {
-            Awaiter* next = awaiters->next;
-            awaiters->cancel();
-            awaiters = next;
-        }
+        Awaiter* next = awaiters->next;
+        awaiters->cancel();
+        awaiters = next;
     }
 }
 
