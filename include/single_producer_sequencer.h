@@ -27,6 +27,8 @@ public:
     TSequence last_published() const;
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence) const;
 
+    void close();
+
 private:
     const ConsumerBarrier& _consumerBarrier;
     const std::size_t _bufferSize;
@@ -58,17 +60,47 @@ SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::SingleProducerSeque
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
 awaitable<TSequence> SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::claim_one()
 {
-    const auto nextToWrite = static_cast<TSequence>(_nextToClaim - _bufferSize);
-    co_await _consumerBarrier.wait_until_published(nextToWrite);
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type){ this->close(); });
+    }
+
+    const auto toClaim = static_cast<TSequence>(_nextToClaim - _bufferSize);
+
+    // Spawn new coro-thread with dummy cancellation slot and co_await-ed its
+    co_await co_spawn(
+        co_await this_coro::executor,
+        _consumerBarrier.wait_until_published(toClaim),
+        bind_cancellation_slot(
+            cancellation_slot(),
+            use_awaitable)
+        );
+
     co_return _nextToClaim++;
 }
 
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
 awaitable<SequenceRange<TSequence, Traits>> SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::claim_up_to(std::size_t count)
 {
-    const auto nextToWrite = static_cast<TSequence>(_nextToClaim - _bufferSize);
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type){ this->close(); });
+    }
+
+    const auto toClaim = static_cast<TSequence>(_nextToClaim - _bufferSize);
+
+    // Spawn new coro-thread with dummy cancellation slot and co_await-ed its
+    const TSequence consumerPosition = co_await co_spawn(
+        co_await this_coro::executor,
+        _consumerBarrier.wait_until_published(toClaim),
+        bind_cancellation_slot(
+            cancellation_slot(),
+            use_awaitable)
+        );
     const TSequence lastAvailableSequence =
-        static_cast<TSequence>(co_await _consumerBarrier.wait_until_published(nextToWrite) + _bufferSize);
+        static_cast<TSequence>(consumerPosition + _bufferSize);
 
     const TSequence begin = _nextToClaim;
     const std::size_t availableCount = static_cast<std::size_t>(lastAvailableSequence - begin) + 1;
@@ -101,7 +133,27 @@ TSequence SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::last_publ
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
 awaitable<TSequence> SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::wait_until_published(TSequence sequence) const
 {
-    return _producerBarrier.wait_until_published(sequence);
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type){ const_cast<SingleProducerSequencer*>(this)->close(); });
+    }
+
+    // Spawn new coro-thread with dummy cancellation slot and co_await-ed its
+    co_return co_await co_spawn(
+        co_await this_coro::executor,
+        _producerBarrier.wait_until_published(sequence),
+        bind_cancellation_slot(
+            cancellation_slot(),
+            use_awaitable)
+        );
+}
+
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+void SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::close()
+{
+    _producerBarrier.close();
+    const_cast<ConsumerBarrier&>(_consumerBarrier).close();
 }
 
 } // namespace boost::asio::awaitable_ext

@@ -76,6 +76,8 @@ public:
         co_return *it;
     }
 
+    void close() {}
+
 private:
     const std::vector<BarrierRef> _barriers;
 };

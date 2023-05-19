@@ -1,12 +1,18 @@
 #include "single_producer_sequencer.h"
+#include "async_sleep.h"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 
 #include <boost/test/unit_test.hpp>
 
 namespace boost::asio::awaitable_ext::test {
+
+using namespace experimental::awaitable_operators;
+using namespace std::chrono_literals;
 
 BOOST_AUTO_TEST_SUITE(tests_SingleProducerSequencer);
 
@@ -142,6 +148,161 @@ BOOST_AUTO_TEST_CASE(claim_up_to)
     BOOST_TEST(result == expectedResult);
 }
 
-BOOST_AUTO_TEST_SUITE_END();
+BOOST_AUTO_TEST_CASE(close)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    SingleProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+    int count = 0;
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        try {
+            co_await sequencer.claim_one();
+        } catch (const system::system_error& ex) {
+            count++;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto consumer = [&]() -> awaitable<void>
+    {
+        try {
+            co_await sequencer.wait_until_published(0);
+        } catch (const system::system_error& ex) {
+            count++;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto close = [&]() -> awaitable<void> { sequencer.close(); co_return; };
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, close(), handler);
+    ioContext.run();
+
+    BOOST_TEST(count == 2);
+}
+
+BOOST_AUTO_TEST_SUITE(install_cancellation_handler);
+
+BOOST_AUTO_TEST_CASE(claim_one)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    SingleProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        auto result = co_await(
+            sequencer.claim_one() ||
+            async_sleep(10ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer win
+    };
+
+    bool consumerCanceled = false;
+    auto consumer = [&]() -> awaitable<void>
+    {
+        try {
+            co_await sequencer.wait_until_published(0);
+        } catch (const system::system_error& ex) {
+            consumerCanceled = true;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    ioContext.run();
+
+    BOOST_TEST(consumerCanceled);
+}
+
+BOOST_AUTO_TEST_CASE(claim_up_to)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    SingleProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        auto result = co_await(
+            sequencer.claim_up_to(1) ||
+            async_sleep(10ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer win
+    };
+
+    bool consumerCanceled = false;
+    auto consumer = [&]() -> awaitable<void>
+    {
+        try {
+            co_await sequencer.wait_until_published(0);
+        } catch (const system::system_error& ex) {
+            consumerCanceled = true;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    ioContext.run();
+
+    BOOST_TEST(consumerCanceled);
+}
+
+BOOST_AUTO_TEST_CASE(wait_until_published)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    SingleProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+
+    bool producerCanceled = false;
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        try {
+            co_await sequencer.claim_one();
+        } catch (const system::system_error& ex) {
+            producerCanceled = true;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto consumer = [&]() -> awaitable<void>
+    {
+        auto result = co_await(
+            sequencer.wait_until_published(0) ||
+            async_sleep(10ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer win
+    };
+
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    ioContext.run();
+
+    BOOST_TEST(producerCanceled);
+}
+
+BOOST_AUTO_TEST_SUITE_END(); // install_cancellation_handler
+
+BOOST_AUTO_TEST_SUITE_END(); // tests_SingleProducerSequencer
 
 } // namespace boost::asio::awaitable_ext::test
