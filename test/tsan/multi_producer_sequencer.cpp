@@ -1,6 +1,8 @@
 #include "multi_producer_sequencer.h"
 
 #include <boost/asio/thread_pool.hpp>
+#include <boost/asio/co_spawn.hpp>
+
 #include <boost/test/unit_test.hpp>
 
 #include <disruptorplus/spin_wait_strategy.hpp>
@@ -38,6 +40,8 @@ struct MockAwaiter
         const std::atomic<disruptorplus::sequence_t>* const sequences[] = { &_published };
         return _waitStrategy.wait_until_published(targetSequence, 1, sequences);
     }
+
+    void cancel() {}
 
 private:
     std::atomic<TSequence> _published;
@@ -164,5 +168,69 @@ BOOST_AUTO_TEST_CASE(MultiProducerSequencer_)
     BOOST_TEST(result1 == expectedResult);
     BOOST_TEST(result2 == expectedResult);
 }
+
+namespace {
+void close_test(std::size_t count) {
+    thread_pool tp{5};
+    any_io_executor executorA = tp.get_executor();
+    any_io_executor executorB = tp.get_executor();
+    any_io_executor executorC = tp.get_executor();
+    any_io_executor executorD = tp.get_executor();
+    any_io_executor executorE = tp.get_executor();
+
+    for (std::size_t i = 0; i < count; i++)
+    {
+        SequenceBarrier<std::size_t> readBarrier;
+        MultiProducerSequencer<std::size_t> sequencer{readBarrier, 1024};
+
+        auto consumer = [&](std::size_t targetSequence) -> awaitable<void> {
+            try {
+                co_await sequencer.wait_until_published(targetSequence, -1);
+            } catch (const system::system_error& ex) {
+                assert(ex.code() == error::operation_aborted);
+            }
+        };
+
+        auto producer = [&]() -> awaitable<void> {
+            auto seq = co_await sequencer.claim_one();
+            sequencer.publish(seq);
+        };
+
+        auto close = [&]() -> awaitable<void> {
+            sequencer.close();
+            co_return;
+        };
+
+        std::atomic_bool consumerDone1{false}, consumerDone2{false}, producerDone1{false}, producerDone2{false}, cancelDone{false};
+
+        auto handler = [](std::atomic_bool& flag)
+        {
+            return [&flag](std::exception_ptr ex)
+            {
+                if (ex) std::rethrow_exception(ex);
+                flag.store(true, std::memory_order_release);
+            };
+        };
+
+        co_spawn(executorA, consumer(0), handler(consumerDone1));
+        co_spawn(executorB, consumer(2), handler(consumerDone2));
+        co_spawn(executorC, producer(), handler(producerDone1));
+        co_spawn(executorD, producer(), handler(producerDone2));
+        co_spawn(executorE, close(), handler(cancelDone));
+
+        while (!consumerDone1.load(std::memory_order_acquire) ||
+               !consumerDone2.load(std::memory_order_acquire) ||
+               !producerDone1.load(std::memory_order_acquire) ||
+               !producerDone2.load(std::memory_order_acquire) ||
+               !cancelDone.load(std::memory_order_acquire))
+            ;
+    };
+
+    tp.join();
+}
+} // Anonymous namespace
+
+BOOST_AUTO_TEST_CASE(MultiProducerSequencer_cancel_1) { close_test(1); }
+BOOST_AUTO_TEST_CASE(MultiProducerSequencer_cancel_10k) { close_test(10'000); }
 
 } // namespace boost::asio::awaitable_ext::test

@@ -1,13 +1,19 @@
 #include "multi_producer_sequencer.h"
 #include "sequence_barrier_group.h"
+#include "async_sleep.h"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 
 #include <boost/test/unit_test.hpp>
 
 namespace boost::asio::awaitable_ext::test {
+
+using namespace experimental::awaitable_operators;
+using namespace std::chrono_literals;
 
 BOOST_AUTO_TEST_SUITE(tests_MultiProducerSequencer)
 
@@ -488,6 +494,179 @@ BOOST_AUTO_TEST_CASE(two_producer_batch)
 }
 
 BOOST_AUTO_TEST_SUITE_END() // two_consumers_unique
+
+BOOST_AUTO_TEST_CASE(close)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    MultiProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        try {
+            co_await sequencer.claim_one();
+            BOOST_FAIL("Exception not throwed");
+        } catch (const system::system_error& ex) {
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    int count = 0;
+    auto consumer = [&]() -> awaitable<void>
+    {
+        try {
+            co_await sequencer.wait_until_published(0, -1);
+            BOOST_FAIL("Exception not throwed");
+        } catch (const system::system_error& ex) {
+            count++;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto close = [&]() -> awaitable<void> { sequencer.close(); co_return; };
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, close(), handler);
+    ioContext.run();
+
+    BOOST_TEST(count == 2);
+}
+
+BOOST_AUTO_TEST_SUITE(install_cancellation_handler)
+
+BOOST_AUTO_TEST_CASE(claim_one)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    MultiProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        auto result = co_await(
+            sequencer.claim_one() ||
+            async_sleep(10ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer win
+    };
+
+    int count = 0;
+    auto consumer = [&]() -> awaitable<void>
+    {
+        try {
+            co_await sequencer.wait_until_published(0, -1);
+            BOOST_FAIL("Exception not throwed");
+        } catch (const system::system_error& ex) {
+            count++;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    ioContext.run();
+
+    BOOST_TEST(count == 2);
+}
+
+BOOST_AUTO_TEST_CASE(claim_up_to)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    MultiProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        auto result = co_await(
+            sequencer.claim_up_to(1) ||
+            async_sleep(10ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer win
+    };
+
+    int count = 0;
+    auto consumer = [&]() -> awaitable<void>
+    {
+        try {
+            co_await sequencer.wait_until_published(0, -1);
+            BOOST_FAIL("Exception not throwed");
+        } catch (const system::system_error& ex) {
+            count++;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, consumer(), handler);
+    ioContext.run();
+
+    BOOST_TEST(count == 2);
+}
+
+BOOST_AUTO_TEST_CASE(wait_until_published)
+{
+    constexpr std::size_t bufferSize = 256;
+    SequenceBarrier<std::size_t> readBarrier;
+    MultiProducerSequencer<std::size_t> sequencer{readBarrier, bufferSize};
+
+    bool producerCanceled = false;
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
+        try {
+            co_await sequencer.claim_one();
+            BOOST_FAIL("Exception not throwed");
+        } catch (const system::system_error& ex) {
+            producerCanceled = true;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto consumer1 = [&]() -> awaitable<void>
+    {
+        auto result = co_await(
+            sequencer.wait_until_published(0, -1) ||
+            async_sleep(10ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer win
+    };
+
+    auto consumer2 = [&]() -> awaitable<void>
+    {
+        try {
+            co_await sequencer.wait_until_published(0, -1);
+            BOOST_FAIL("Exception not throwed");
+        } catch (const system::system_error& ex) {
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, producer(), handler);
+    co_spawn(ioContext, consumer1(), handler);
+    co_spawn(ioContext, consumer2(), handler);
+    ioContext.run();
+
+    BOOST_TEST(producerCanceled);
+}
+
+BOOST_AUTO_TEST_SUITE_END() // install_cancellation_handler
 
 BOOST_AUTO_TEST_SUITE_END() // tests_MultiProducerSequencer
 

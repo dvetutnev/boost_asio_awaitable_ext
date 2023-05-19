@@ -33,6 +33,8 @@ struct MultiProducerSequencerAwaiter
         _event.set();
     }
 
+    void cancel() { _event.cancel(); }
+
 private:
     Event _event;
 };
@@ -120,6 +122,8 @@ public:
     /// there are coroutines that need to be woken up once.
     void publish(const SequenceRange<TSequence, Traits>& range);
 
+    void close();
+
 private:
     const ConsumerBarrier& _consumerBarrier;
     const std::size_t _indexMask;
@@ -127,6 +131,7 @@ private:
 
     std::atomic<TSequence> _nextToClaim;
     mutable std::atomic<Awaiter*> _awaiters;
+    std::atomic<bool> _isClosed;
 
     void resume_ready_awaiters();
 
@@ -143,7 +148,8 @@ MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::MultiProduc
     _indexMask{bufferSize - 1},
     _published{std::make_unique<std::atomic<TSequence>[]>(bufferSize)},
     _nextToClaim{static_cast<TSequence>(initialSequence + 1)},
-    _awaiters{nullptr}
+    _awaiters{nullptr},
+    _isClosed{false}
 {
     // bufferSize must be a positive power-of-two
     assert(bufferSize > 0 && (bufferSize & (bufferSize - 1)) == 0);
@@ -181,9 +187,25 @@ template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TS
 awaitable<TSequence> MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::wait_until_published(TSequence targetSequence,
                                                                                                                TSequence lastKnownPublished) const
 {
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type){ const_cast<MultiProducerSequencer*>(this)->close(); });
+    }
+
     auto awaiter = Awaiter{targetSequence, lastKnownPublished};
     add_awaiter(&awaiter);
-    TSequence available = co_await awaiter.wait();
+
+    // Spawn new coro-thread with dummy cancellation slot and co_await-ed its
+    // We explicit call event.close() from awaiter
+    TSequence available = co_await co_spawn(
+        co_await this_coro::executor,
+        awaiter.wait(),
+        bind_cancellation_slot(
+            cancellation_slot(),
+            use_awaitable)
+        );
+
     co_return available;
 }
 
@@ -198,18 +220,48 @@ bool MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::any_av
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>
 awaitable<TSequence> MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::claim_one()
 {
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type){ this->close(); });
+    }
+
     const TSequence claimedSequence = _nextToClaim.fetch_add(1, std::memory_order_relaxed);
-    co_await _consumerBarrier.wait_until_published(claimedSequence - buffer_size());
+
+    // Spawn new coro-thread with dummy cancellation slot and co_await-ed its
+    co_await co_spawn(
+        co_await this_coro::executor,
+        _consumerBarrier.wait_until_published(claimedSequence - buffer_size()),
+        bind_cancellation_slot(
+            cancellation_slot(),
+            use_awaitable)
+        );
+
     co_return claimedSequence;
 }
 
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>
 awaitable<SequenceRange<TSequence, Traits>> MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::claim_up_to(std::size_t count)
 {
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type){ this->close(); });
+    }
+
     count = std::min(count, buffer_size());
     const TSequence first = _nextToClaim.fetch_add(count, std::memory_order_relaxed);
     auto claimedRange = SequenceRange<TSequence, Traits>{first, first + count};
-    co_await _consumerBarrier.wait_until_published(claimedRange.back() - buffer_size());
+
+    // Spawn new coro-thread with dummy cancellation slot and co_await-ed its
+    co_await co_spawn(
+        co_await this_coro::executor,
+        _consumerBarrier.wait_until_published(claimedRange.back() - buffer_size()),
+        bind_cancellation_slot(
+            cancellation_slot(),
+            use_awaitable)
+        );
+
     co_return claimedRange;
 }
 
@@ -263,6 +315,8 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::resume
 
     Awaiter* awaitersToRequeue;
     Awaiter** awaitersToRequeueTail = &awaitersToRequeue;
+
+    bool isClosed = false;
 
     do
     {
@@ -336,8 +390,13 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::resume
                 }
                 ++seq;
             }
+
+            isClosed = _isClosed.load(std::memory_order_seq_cst);
+            if (isClosed && awaiters == nullptr) {
+                awaiters = _awaiters.exchange(nullptr, std::memory_order_acquire);
+            }
         }
-    } while (awaiters != nullptr);
+    } while (awaiters != nullptr && !isClosed);
 
     // Null-terminate list of awaiters to resume.
     *awaitersToResumeTail = nullptr;
@@ -347,6 +406,15 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::resume
         Awaiter* next = awaitersToResume->next;
         awaitersToResume->resume(lastKnownPublished);
         awaitersToResume = next;
+    }
+
+    if (isClosed) {
+        while (awaiters != nullptr)
+        {
+            Awaiter* next = awaiters->next;
+            awaiters->cancel();
+            awaiters = next;
+        }
     }
 }
 
@@ -361,6 +429,8 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::add_aw
 
     Awaiter* awaitersToResume;
     Awaiter** awaitersToResumeTail = &awaitersToResume;
+
+    bool isClosed = false;
 
     do
     {
@@ -398,8 +468,9 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::add_aw
         {
             ++lastKnownPublished;
         }
+        isClosed = _isClosed.load(std::memory_order_seq_cst);
 
-        if (!Traits::precedes(lastKnownPublished, targetSequence))
+        if (!Traits::precedes(lastKnownPublished, targetSequence) || isClosed)
         {
             // At least one awaiter we just enqueued has now been satisified.
             // To ensure it is woken up we need to reacquire the list of awaiters and resume
@@ -435,7 +506,7 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::add_aw
         // Null-terminate list of awaiters to enqueue.
         *awaitersToEnqueueTail = nullptr;
 
-    } while (awaitersToEnqueue != nullptr);
+    } while (awaitersToEnqueue != nullptr && !isClosed);
 
     // Null-terminate awaiters to resume.
     *awaitersToResumeTail = nullptr;
@@ -448,6 +519,29 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::add_aw
         awaitersToResume->resume(lastKnownPublished);
         awaitersToResume = next;
     }
+
+    if (isClosed) {
+        while (awaitersToEnqueue != nullptr)
+        {
+            Awaiter* next = awaitersToEnqueue->next;
+            awaitersToEnqueue->cancel();
+            awaitersToEnqueue = next;
+        }
+    }
+}
+
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>
+void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::close()
+{
+    _isClosed.exchange(true, std::memory_order_seq_cst);
+    Awaiter* awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
+    while (awaiters != nullptr)
+    {
+        Awaiter* next = awaiters->next;
+        awaiters->cancel();
+        awaiters = next;
+    }
+    const_cast<ConsumerBarrier&>(_consumerBarrier).close();
 }
 
 } // namespace boost::asio::awaitable_ext

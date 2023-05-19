@@ -359,6 +359,7 @@ BOOST_AUTO_TEST_CASE(cancellation)
     {
         try {
             co_await barrier2.wait_until_published(0);
+            BOOST_FAIL("Exception not throwed");
         } catch (const system::system_error& ex) {
             consumer2Canceled = true;
             BOOST_TEST(ex.code() == error::operation_aborted);
@@ -384,6 +385,7 @@ BOOST_AUTO_TEST_CASE(cancellation_from_barrier)
     {
         try {
             co_await barrierGroup.wait_until_published(0);
+            BOOST_FAIL("Exception not throwed");
         } catch (const system::system_error& ex) {
             BOOST_TEST(ex.code() == error::operation_aborted);
         }

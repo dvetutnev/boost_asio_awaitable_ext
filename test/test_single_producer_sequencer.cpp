@@ -160,6 +160,7 @@ BOOST_AUTO_TEST_CASE(close)
         co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
         try {
             co_await sequencer.claim_one();
+            BOOST_FAIL("Exception not throwed");
         } catch (const system::system_error& ex) {
             count++;
             BOOST_TEST(ex.code() == error::operation_aborted);
@@ -170,6 +171,7 @@ BOOST_AUTO_TEST_CASE(close)
     {
         try {
             co_await sequencer.wait_until_published(0);
+            BOOST_FAIL("Exception not throwed");
         } catch (const system::system_error& ex) {
             count++;
             BOOST_TEST(ex.code() == error::operation_aborted);
@@ -211,6 +213,7 @@ BOOST_AUTO_TEST_CASE(claim_one)
     {
         try {
             co_await sequencer.wait_until_published(0);
+            BOOST_FAIL("Exception not throwed");
         } catch (const system::system_error& ex) {
             consumerCanceled = true;
             BOOST_TEST(ex.code() == error::operation_aborted);
@@ -248,6 +251,7 @@ BOOST_AUTO_TEST_CASE(claim_up_to)
     {
         try {
             co_await sequencer.wait_until_published(0);
+            BOOST_FAIL("Exception not throwed");
         } catch (const system::system_error& ex) {
             consumerCanceled = true;
             BOOST_TEST(ex.code() == error::operation_aborted);
@@ -276,6 +280,7 @@ BOOST_AUTO_TEST_CASE(wait_until_published)
         co_await sequencer.claim_up_to(bufferSize); // claim all buffer befor wait
         try {
             co_await sequencer.claim_one();
+            BOOST_FAIL("Exception not throwed");
         } catch (const system::system_error& ex) {
             producerCanceled = true;
             BOOST_TEST(ex.code() == error::operation_aborted);

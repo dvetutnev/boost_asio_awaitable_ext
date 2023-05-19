@@ -61,9 +61,7 @@ public:
 
         (void)order;
 
-        if (std::ranges::any_of(_barriers,
-                                [](BarrierRef b) { return b.get().is_closed(); }))
-        {
+        if (is_closed()) {
             throw system::system_error{error::operation_aborted};
         }
 
