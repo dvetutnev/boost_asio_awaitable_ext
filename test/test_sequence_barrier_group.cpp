@@ -1,6 +1,7 @@
 #include "sequence_barrier_group.h"
 #include "single_producer_sequencer.h"
 #include "schedule.h"
+#include "async_sleep.h"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -9,8 +10,11 @@
 #include <boost/asio/thread_pool.hpp>
 
 #include <boost/test/unit_test.hpp>
-#include <thread>
+
 namespace boost::asio::awaitable_ext::test {
+
+using namespace experimental::awaitable_operators;
+using namespace std::chrono_literals;
 
 BOOST_AUTO_TEST_SUITE(tests_SequenceBarrierGroup);
 
@@ -84,7 +88,6 @@ BOOST_AUTO_TEST_CASE(_)
 
     auto main = [&]() -> awaitable<void>
     {
-        using namespace experimental::awaitable_operators;
         co_await(consumer() && producer());
         co_return;
     };
@@ -128,7 +131,6 @@ BOOST_AUTO_TEST_CASE(return_earliest)
 
     auto main = [&]() -> awaitable<void>
     {
-        using namespace experimental::awaitable_operators;
         co_await(consumer() && producer());
         co_return;
     };
@@ -163,7 +165,6 @@ BOOST_AUTO_TEST_CASE(return_earliest2)
 
     auto main = [&]() -> awaitable<void>
     {
-        using namespace experimental::awaitable_operators;
         co_await(consumer() && producer());
         co_return;
     };
@@ -337,6 +338,81 @@ BOOST_AUTO_TEST_CASE(unique)
     constexpr std::uint64_t expectedResult =
         static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
     BOOST_TEST(result1 + result2 == expectedResult);
+}
+
+BOOST_AUTO_TEST_CASE(cancellation)
+{
+    SequenceBarrier<std::size_t> barrier1, barrier2;
+    SequenceBarrierGroup<std::size_t> barrierGroup{{barrier1, barrier2}};
+
+    auto consumer1 = [&]() -> awaitable<void>
+    {
+        auto result = co_await(
+            barrierGroup.wait_until_published(0) ||
+            async_sleep(10ms)
+            );
+        BOOST_TEST(result.index() == 1); // timer win
+    };
+
+    bool consumer2Canceled = false;
+    auto consumer2 = [&]() -> awaitable<void>
+    {
+        try {
+            co_await barrier2.wait_until_published(0);
+        } catch (const system::system_error& ex) {
+            consumer2Canceled = true;
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, consumer1, handler);
+    co_spawn(ioContext, consumer2, handler);
+    ioContext.run();
+
+    BOOST_TEST(consumer2Canceled);
+}
+
+BOOST_AUTO_TEST_CASE(cancellation_from_barrier)
+{
+    SequenceBarrier<std::size_t> barrier1, barrier2;
+    SequenceBarrierGroup<std::size_t> barrierGroup{{barrier1, barrier2}};
+
+    auto consumer = [&]() -> awaitable<void>
+    {
+        try {
+            co_await barrierGroup.wait_until_published(0);
+        } catch (const system::system_error& ex) {
+            BOOST_TEST(ex.code() == error::operation_aborted);
+        }
+    };
+
+    auto closeBarrier = [&]() -> awaitable<void> { barrier2.close(); co_return; };
+    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
+
+    io_context ioContext;
+    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, closeBarrier(), handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(close)
+{
+    SequenceBarrier<std::size_t> barrier1, barrier2;
+    SequenceBarrierGroup<std::size_t> barrierGroup{{barrier1, barrier2}};
+    barrierGroup.close();
+    BOOST_TEST(barrier1.is_closed());
+    BOOST_TEST(barrier2.is_closed());
+}
+
+BOOST_AUTO_TEST_CASE(is_closing)
+{
+    SequenceBarrier<std::size_t> barrier1, barrier2, barrier3;
+    SequenceBarrierGroup<std::size_t> barrierGroup{{barrier1, barrier2, barrier3}};
+    barrier2.close();
+    BOOST_TEST(barrierGroup.is_closed());
 }
 
 BOOST_AUTO_TEST_SUITE_END();

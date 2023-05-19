@@ -56,7 +56,9 @@ public:
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence, any_io_executor) const;
 
     void publish(TSequence);
+
     void close();
+    bool is_closed() const;
 
 protected:
     void add_awaiter(Awaiter*) const;
@@ -308,6 +310,12 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::close()
         awaiters->cancel();
         awaiters = next;
     }
+}
+
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+bool SequenceBarrier<TSequence, Traits, Awaiter>::is_closed() const
+{
+    return _isClosed.load(std::memory_order_relaxed);
 }
 
 } // namespace boost::asio::awaitable_ext

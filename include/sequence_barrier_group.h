@@ -32,7 +32,7 @@ public:
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence targetSequence) const
     {
         using experimental::make_parallel_group;
-        using experimental::wait_for_all;
+        using experimental::wait_for_one_error;
 
         auto executor = co_await this_coro::executor;
 
@@ -57,9 +57,16 @@ public:
 
         auto [order, exceptions, published] =
             co_await make_parallel_group(std::move(operations))
-                .async_wait(wait_for_all(), use_awaitable);
+                .async_wait(wait_for_one_error(), use_awaitable);
 
         (void)order;
+
+        if (std::ranges::any_of(_barriers,
+                                [](BarrierRef b) { return b.get().is_closed(); }))
+        {
+            throw system::system_error{error::operation_aborted};
+        }
+
         auto isThrow = [](const std::exception_ptr& ex) -> bool { return !!ex; };
         if (auto firstEx = std::find_if(std::begin(exceptions), std::end(exceptions), isThrow);
             firstEx != std::end(exceptions))
@@ -76,7 +83,9 @@ public:
         co_return *it;
     }
 
-    void close() {}
+    void close() { for (BarrierRef b : _barriers) b.get().close(); }
+    bool is_closed() const { return std::ranges::any_of(_barriers,
+                                   [](BarrierRef b) -> bool { return b.get().is_closed(); }); }
 
 private:
     const std::vector<BarrierRef> _barriers;
