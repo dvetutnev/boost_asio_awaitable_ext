@@ -134,6 +134,8 @@ private:
     std::atomic<bool> _isClosed;
 
     void resume_ready_awaiters();
+    void resume_awaiters(Awaiter*, TSequence) const;
+    void cancel_awaiters(Awaiter*) const;
 
 protected:
     void add_awaiter(Awaiter*) const;
@@ -401,20 +403,9 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::resume
     // Null-terminate list of awaiters to resume.
     *awaitersToResumeTail = nullptr;
 
-    while (awaitersToResume != nullptr)
-    {
-        Awaiter* next = awaitersToResume->next;
-        awaitersToResume->resume(lastKnownPublished);
-        awaitersToResume = next;
-    }
-
+    resume_awaiters(awaitersToResume, lastKnownPublished);
     if (isClosed) {
-        while (awaiters != nullptr)
-        {
-            Awaiter* next = awaiters->next;
-            awaiters->cancel();
-            awaiters = next;
-        }
+        cancel_awaiters(awaiters);
     }
 }
 
@@ -512,21 +503,9 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::add_aw
     *awaitersToResumeTail = nullptr;
 
     // Finally, resume any awaiters we've found that are ready to go.
-    while (awaitersToResume != nullptr)
-    {
-        // Read m_next before calling .resume() as resuming could destroy the awaiter.
-        Awaiter* next = awaitersToResume->next;
-        awaitersToResume->resume(lastKnownPublished);
-        awaitersToResume = next;
-    }
-
+    resume_awaiters(awaitersToResume, lastKnownPublished);
     if (isClosed) {
-        while (awaitersToEnqueue != nullptr)
-        {
-            Awaiter* next = awaitersToEnqueue->next;
-            awaitersToEnqueue->cancel();
-            awaitersToEnqueue = next;
-        }
+        cancel_awaiters(awaitersToEnqueue);
     }
 }
 
@@ -535,13 +514,30 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::close(
 {
     _isClosed.exchange(true, std::memory_order_seq_cst);
     Awaiter* awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
+    cancel_awaiters(awaiters);
+    const_cast<ConsumerBarrier&>(_consumerBarrier).close();
+}
+
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>
+void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::resume_awaiters(Awaiter* awaiters, TSequence published) const
+{
+    while (awaiters != nullptr)
+    {
+        Awaiter* next = awaiters->next;
+        awaiters->resume(published);
+        awaiters = next;
+    }
+}
+
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>
+void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::cancel_awaiters(Awaiter* awaiters) const
+{
     while (awaiters != nullptr)
     {
         Awaiter* next = awaiters->next;
         awaiters->cancel();
         awaiters = next;
     }
-    const_cast<ConsumerBarrier&>(_consumerBarrier).close();
 }
 
 } // namespace boost::asio::awaitable_ext

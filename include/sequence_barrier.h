@@ -67,6 +67,9 @@ private:
     std::atomic<TSequence> _lastPublished;
     mutable std::atomic<Awaiter*> _awaiters;
     std::atomic<bool> _isClosed;
+
+    void resume_awaiters(Awaiter*, TSequence) const;
+    void cancel_awaiters(Awaiter*) const;
 };
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
@@ -180,22 +183,12 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::publish(TSequence sequence)
         }
     }
 
-    while (awaitersToResume)
-    {
-        Awaiter* next = awaitersToResume->next;
-        awaitersToResume->resume(sequence);
-        awaitersToResume = next;
-    }
+    resume_awaiters(awaitersToResume, sequence);
 
     if (_isClosed.load(std::memory_order_seq_cst))
     {
         awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
-        while (awaiters != nullptr)
-        {
-            Awaiter* next = awaiters->next;
-            awaiters->cancel();
-            awaiters = next;
-        }
+        cancel_awaiters(awaiters);
     }
 }
 
@@ -282,20 +275,9 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::add_awaiter(Awaiter* awaiter) 
     *awaitersToResumeTail = nullptr;
 
     // Resume the awaiters that are ready
-    while (awaitersToResume != nullptr)
-    {
-        Awaiter* next = awaitersToResume->next;
-        awaitersToResume->resume(lastKnownPublished);
-        awaitersToResume = next;
-    }
-
+    resume_awaiters(awaitersToResume, lastKnownPublished);
     if (isClosed) {
-        while (awaitersToRequeue != nullptr)
-        {
-            Awaiter* next = awaitersToRequeue->next;
-            awaitersToRequeue->cancel();
-            awaitersToRequeue = next;
-        }
+        cancel_awaiters(awaitersToRequeue);
     }
 }
 
@@ -304,18 +286,35 @@ void SequenceBarrier<TSequence, Traits, Awaiter>::close()
 {
     _isClosed.exchange(true, std::memory_order_seq_cst);
     Awaiter* awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
-    while (awaiters != nullptr)
-    {
-        Awaiter* next = awaiters->next;
-        awaiters->cancel();
-        awaiters = next;
-    }
+    cancel_awaiters(awaiters);
 }
 
 template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
 bool SequenceBarrier<TSequence, Traits, Awaiter>::is_closed() const
 {
     return _isClosed.load(std::memory_order_relaxed);
+}
+
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+void SequenceBarrier<TSequence, Traits, Awaiter>::resume_awaiters(Awaiter* awaiters, TSequence published) const
+{
+    while (awaiters != nullptr)
+    {
+        Awaiter* next = awaiters->next;
+        awaiters->resume(published);
+        awaiters = next;
+    }
+}
+
+template<std::unsigned_integral TSequence, typename Traits, typename Awaiter>
+void SequenceBarrier<TSequence, Traits, Awaiter>::cancel_awaiters(Awaiter* awaiters) const
+{
+    while (awaiters != nullptr)
+    {
+        Awaiter* next = awaiters->next;
+        awaiters->cancel();
+        awaiters = next;
+    }
 }
 
 } // namespace boost::asio::awaitable_ext
