@@ -1,17 +1,17 @@
 { pkgs ? import <nixpkgs> {} }:
 
-let
-  stdenv = pkgs.gcc12Stdenv;
-  boost = pkgs.boost182;
+with pkgs; let
+  developEnv = (overrideCC stdenv gcc13);
+  boost = boost182;
 in
-  pkgs.mkShell {
-    name = "nix-shell";
-    packages = with pkgs; [
+  mkShell.override { stdenv = developEnv; } {
+    name = "developEnv";
+    packages = [
       gdb
       cmake-format
     ];
     inputsFrom = [
-      (pkgs.callPackage ./default.nix { inherit stdenv boost; })
+      (callPackage ./default.nix { inherit stdenv boost; })
     ];
   }
 

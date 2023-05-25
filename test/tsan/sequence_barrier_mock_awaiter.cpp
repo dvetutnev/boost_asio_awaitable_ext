@@ -2,6 +2,8 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <cstdint>
+
 namespace boost::asio::awaitable_ext::test {
 
 using AwaitersStorage = MockAwaitersStorage<std::uint8_t>;

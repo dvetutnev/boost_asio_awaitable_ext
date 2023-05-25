@@ -4,6 +4,7 @@
 #include <boost/mpl/list.hpp>
 
 #include <limits>
+#include <cstdint>
 
 namespace boost::asio::awaitable_ext::test {
 
