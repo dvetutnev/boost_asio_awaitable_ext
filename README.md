@@ -80,3 +80,27 @@ ThreadSanitizer tests
 [nix-shell]$ cmake --build build
 [nix-shell]$ ctest --test-dir build
 ```
+
+# NATS environment
+
+## Run NATS server in Docker
+```bash
+$ docker run --name local-nats -p 4222:4222 -p 8222:8222 nats -m 8222 --auth token
+```
+
+## [NATS Utility](https://docs.nats.io/using-nats/nats-tools/nats_cli)
+```bash
+$ nix-shell -p natscli
+```
+
+```bash
+[nix-shell:~]$ nats sub --server=token@localhost a.b
+08:44:25 Subscribing on a.b 
+[#1] Received on "a.b"
+45
+```
+
+```bash
+[nix-shell:~]$ nats --server=token@localhost pub a.b 45
+08:45:30 Published 2 bytes to "a.b"
+```

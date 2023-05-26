@@ -9,6 +9,7 @@ add_executable(
   test_single_producer_sequencer.cpp
   test_multi_producer_sequencer.cpp
   test_asio_multithread.cpp
+  test_nats_coro.cpp
   main.cpp)
 target_link_libraries(tests PRIVATE ${PROJECT_NAME} Boost::unit_test_framework)
 add_test(NAME ${PROJECT_NAME} COMMAND tests)

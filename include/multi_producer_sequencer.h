@@ -56,7 +56,8 @@ public:
     MultiProducerSequencer& operator=(const MultiProducerSequencer&) = delete;
 
     /// The size of the circular buffer. This will be a power-of-two.
-    std::size_t buffer_size() const noexcept { return _indexMask + 1; };
+    std::size_t buffer_size() const noexcept { return _indexMask + 1; }
+    std::size_t index_mask() const noexcept { return _indexMask; }
 
     /// Lookup the last-known-published sequence number after the specified
     /// sequence number.

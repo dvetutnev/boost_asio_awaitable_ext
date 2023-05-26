@@ -18,11 +18,12 @@ if(ASIO_HANDLER_TRACKING)
     add_compile_definitions(BOOST_ASIO_ENABLE_HANDLER_TRACKING=1)
 endif()
 
-find_package(Boost REQUIRED COMPONENTS unit_test_framework)
+find_package(Boost REQUIRED COMPONENTS unit_test_framework json)
 
-add_library(${PROJECT_NAME} INTERFACE)
-target_include_directories(${PROJECT_NAME} INTERFACE include)
-target_link_libraries(${PROJECT_NAME} INTERFACE Boost::boost)
+add_library(${PROJECT_NAME} src/nats_coro.cpp)
+target_include_directories(${PROJECT_NAME} PUBLIC include)
+target_link_libraries(${PROJECT_NAME} PUBLIC Boost::boost)
+target_link_libraries(${PROJECT_NAME} PRIVATE Boost::json)
 
 if(TSAN_TESTS)
   add_library(disruptorplus INTERFACE)
