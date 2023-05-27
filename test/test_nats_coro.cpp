@@ -1,6 +1,6 @@
 #include "nats_coro.h"
 #include "event.h"
-#include "async_sleep.h"
+#include "utils.h"
 
 #include <boost/asio.hpp>
 #include <boost/asio/io_context.hpp>
@@ -11,17 +11,13 @@
 
 #include <boost/test/unit_test.hpp>
 
-namespace nats_coro {
+namespace nats_coro::test {
 
 using namespace boost::asio;
 using namespace boost::asio::awaitable_ext;
 using namespace boost::asio::experimental::awaitable_operators;
 
-using boost::asio::awaitable_ext::test::async_sleep;
-
 using namespace std::chrono_literals;
-
-namespace { void rethrow_handler(std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); } } // Anonymous namespace
 
 BOOST_AUTO_TEST_SUITE(nats_coro);
 

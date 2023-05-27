@@ -1,6 +1,6 @@
 #include "sequence_barrier.h"
 #include "schedule.h"
-#include "async_sleep.h"
+#include "utils.h"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/detached.hpp>
@@ -319,9 +319,9 @@ BOOST_AUTO_TEST_CASE(close)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, consumer(42), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, consumer(89), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, close(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, consumer(42), rethrow_handler);
+    co_spawn(ioContext, consumer(89), rethrow_handler);
+    co_spawn(ioContext, close(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(count == 2);
@@ -343,7 +343,7 @@ BOOST_AUTO_TEST_CASE(install_cancellation_handler)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, main(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, main(), rethrow_handler);
     ioContext.run();
 }
 

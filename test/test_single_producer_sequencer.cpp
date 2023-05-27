@@ -1,5 +1,5 @@
 #include "single_producer_sequencer.h"
-#include "async_sleep.h"
+#include "utils.h"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -179,18 +179,17 @@ BOOST_AUTO_TEST_CASE(close)
     };
 
     auto close = [&]() -> awaitable<void> { sequencer.close(); co_return; };
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
 
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer(), handler);
-    co_spawn(ioContext, close(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, close(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(count == 2);
 }
 
-BOOST_AUTO_TEST_SUITE(install_cancellation_handler);
+BOOST_AUTO_TEST_SUITE(install_cancellation_rethrow_handler);
 
 BOOST_AUTO_TEST_CASE(claim_one)
 {
@@ -220,11 +219,9 @@ BOOST_AUTO_TEST_CASE(claim_one)
         }
     };
 
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
-
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(consumerCanceled);
@@ -258,11 +255,9 @@ BOOST_AUTO_TEST_CASE(claim_up_to)
         }
     };
 
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
-
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(consumerCanceled);
@@ -296,11 +291,9 @@ BOOST_AUTO_TEST_CASE(wait_until_published)
         BOOST_TEST(result.index() == 1); // timer win
     };
 
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
-
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(producerCanceled);

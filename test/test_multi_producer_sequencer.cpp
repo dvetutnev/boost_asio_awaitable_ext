@@ -1,6 +1,6 @@
 #include "multi_producer_sequencer.h"
 #include "sequence_barrier_group.h"
-#include "async_sleep.h"
+#include "utils.h"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -525,13 +525,12 @@ BOOST_AUTO_TEST_CASE(close)
     };
 
     auto close = [&]() -> awaitable<void> { sequencer.close(); co_return; };
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
 
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer(), handler);
-    co_spawn(ioContext, consumer(), handler);
-    co_spawn(ioContext, close(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, close(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(count == 2);
@@ -567,12 +566,10 @@ BOOST_AUTO_TEST_CASE(claim_one)
         }
     };
 
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
-
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer(), handler);
-    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(count == 2);
@@ -606,12 +603,10 @@ BOOST_AUTO_TEST_CASE(claim_up_to)
         }
     };
 
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
-
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer(), handler);
-    co_spawn(ioContext, consumer(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(count == 2);
@@ -655,12 +650,10 @@ BOOST_AUTO_TEST_CASE(wait_until_published)
         }
     };
 
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
-
     io_context ioContext;
-    co_spawn(ioContext, producer(), handler);
-    co_spawn(ioContext, consumer1(), handler);
-    co_spawn(ioContext, consumer2(), handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, consumer1(), rethrow_handler);
+    co_spawn(ioContext, consumer2(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(producerCanceled);

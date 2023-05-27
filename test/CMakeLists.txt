@@ -12,6 +12,7 @@ add_executable(
   test_nats_coro.cpp
   test_concepts.cpp
   test_queue.cpp
+  utils.cpp
   main.cpp)
 target_link_libraries(tests PRIVATE ${PROJECT_NAME} Boost::unit_test_framework)
 add_test(NAME ${PROJECT_NAME} COMMAND tests)

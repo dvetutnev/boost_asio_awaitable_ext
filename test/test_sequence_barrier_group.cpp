@@ -1,7 +1,7 @@
 #include "sequence_barrier_group.h"
 #include "single_producer_sequencer.h"
 #include "schedule.h"
-#include "async_sleep.h"
+#include "utils.h"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -366,11 +366,9 @@ BOOST_AUTO_TEST_CASE(cancellation)
         }
     };
 
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
-
     io_context ioContext;
-    co_spawn(ioContext, consumer1, handler);
-    co_spawn(ioContext, consumer2, handler);
+    co_spawn(ioContext, consumer1, rethrow_handler);
+    co_spawn(ioContext, consumer2, rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(consumer2Canceled);
@@ -392,11 +390,10 @@ BOOST_AUTO_TEST_CASE(cancellation_from_barrier)
     };
 
     auto closeBarrier = [&]() -> awaitable<void> { barrier2.close(); co_return; };
-    auto handler = [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); };
 
     io_context ioContext;
-    co_spawn(ioContext, consumer(), handler);
-    co_spawn(ioContext, closeBarrier(), handler);
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, closeBarrier(), rethrow_handler);
     ioContext.run();
 }
 

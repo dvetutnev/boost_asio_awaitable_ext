@@ -1,4 +1,4 @@
-#include "async_sleep.h"
+#include "utils.h"
 
 #include <boost/asio/system_timer.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -50,7 +50,7 @@ BOOST_AUTO_TEST_CASE(cancel_timer_when_destroy)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, main(), [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, main(), rethrow_handler);
     ioContext.run();
 }
 
@@ -78,7 +78,7 @@ BOOST_AUTO_TEST_CASE(first_timer)
         BOOST_TEST(duration < 150ms);
     };
 
-    co_spawn(ioContext, main(), [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, main(), rethrow_handler);
     ioContext.run();
 }
 
@@ -107,8 +107,8 @@ BOOST_AUTO_TEST_CASE(explicit_cancel_timer)
         cancelableTimer.cancel();
     };
 
-    co_spawn(ioContext, waitCancelableTimer(), [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, cancelTimerAfter(100ms), [](std::exception_ptr ex) { if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, waitCancelableTimer(), rethrow_handler);
+    co_spawn(ioContext, cancelTimerAfter(100ms), rethrow_handler);
     ioContext.run();
 }
 

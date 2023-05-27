@@ -97,7 +97,11 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_pub
 {
     TSequence lastPublished = last_published();
     if (!Traits::precedes(lastPublished, targetSequence)) {
-        co_return lastPublished;
+        if (is_closed()) {
+            throw system::system_error{error::operation_aborted};
+        } else {
+            co_return lastPublished;
+        }
     }
 
     auto cs = co_await this_coro::cancellation_state;

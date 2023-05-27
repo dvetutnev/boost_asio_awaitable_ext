@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "sequence_range.h"
@@ -19,6 +20,10 @@ public:
     SingleProducerSequencer(const SingleProducerSequencer&) = delete;
     SingleProducerSequencer& operator=(const SingleProducerSequencer&) = delete;
 
+    /// The size of the circular buffer. This will be a power-of-two.
+    std::size_t buffer_size() const noexcept { return _bufferSize; }
+    std::size_t index_mask() const noexcept { return _bufferSize - 1; }
+
     [[nodiscard]] awaitable<TSequence> claim_one();
     [[nodiscard]] awaitable<SequenceRange<TSequence, Traits>> claim_up_to(std::size_t);
     void publish(TSequence);
@@ -28,6 +33,7 @@ public:
     [[nodiscard]] awaitable<TSequence> wait_until_published(TSequence) const;
 
     void close();
+    bool is_closed() const;
 
 private:
     const ConsumerBarrier& _consumerBarrier;
@@ -154,6 +160,12 @@ void SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::close()
 {
     _producerBarrier.close();
     const_cast<ConsumerBarrier&>(_consumerBarrier).close();
+}
+
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
+bool SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::is_closed() const
+{
+    return _producerBarrier.is_close() || _consumerBarrier.is_closed();
 }
 
 } // namespace boost::asio::awaitable_ext

@@ -11,7 +11,7 @@ in
       cmake-format
     ];
     inputsFrom = [
-      (callPackage ./default.nix { inherit stdenv boost; })
+      (callPackage ./default.nix { stdenv = developEnv; inherit boost;})
     ];
   }
 

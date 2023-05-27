@@ -124,6 +124,7 @@ public:
     void publish(const SequenceRange<TSequence, Traits>& range);
 
     void close();
+    bool is_closed() const;
 
 private:
     const ConsumerBarrier& _consumerBarrier;
@@ -517,6 +518,12 @@ void MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::close(
     Awaiter* awaiters = _awaiters.exchange(nullptr, std::memory_order_seq_cst);
     cancel_awaiters(awaiters);
     const_cast<ConsumerBarrier&>(_consumerBarrier).close();
+}
+
+template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>
+bool MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::is_closed() const
+{
+    return _isClosed.load(std::memory_order_relaxed) || _consumerBarrier.is_closed();
 }
 
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier, typename Awaiter>

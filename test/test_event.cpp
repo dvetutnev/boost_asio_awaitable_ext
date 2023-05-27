@@ -1,6 +1,6 @@
 #include "event.h"
 #include "schedule.h"
-#include "async_sleep.h"
+#include "utils.h"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/detached.hpp>
@@ -47,8 +47,8 @@ BOOST_AUTO_TEST_CASE(simple)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
@@ -79,8 +79,8 @@ BOOST_AUTO_TEST_CASE(set_before_wait)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
@@ -113,9 +113,9 @@ BOOST_AUTO_TEST_CASE(cancel)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, timeout(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    co_spawn(ioContext, timeout(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
@@ -144,8 +144,8 @@ BOOST_AUTO_TEST_CASE(cancel_before_wait)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, producer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
     ioContext.run();
 
     BOOST_TEST(reachedPointA);
@@ -165,7 +165,7 @@ BOOST_AUTO_TEST_CASE(install_cancellation_handler)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, main(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, main(), rethrow_handler);
     ioContext.run();
 }
 
@@ -184,8 +184,8 @@ BOOST_AUTO_TEST_CASE(cancel_example)
     };
 
     io_context ioContext;
-    co_spawn(ioContext, consumer(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
-    co_spawn(ioContext, timeout(), [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, timeout(), rethrow_handler);
     ioContext.run();
 }
 
