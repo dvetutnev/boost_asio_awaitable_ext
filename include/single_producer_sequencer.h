@@ -165,7 +165,7 @@ void SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::close()
 template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TSequence> ConsumerBarrier>
 bool SingleProducerSequencer<TSequence, Traits, ConsumerBarrier>::is_closed() const
 {
-    return _producerBarrier.is_close() || _consumerBarrier.is_closed();
+    return _producerBarrier.is_closed() || _consumerBarrier.is_closed();
 }
 
 } // namespace boost::asio::awaitable_ext

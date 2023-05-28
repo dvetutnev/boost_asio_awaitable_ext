@@ -9,6 +9,16 @@
 #include <memory>
 #include <tuple>
 
+namespace boost::asio::awaitable_ext {
+
+extern template class SequenceTraits<std::size_t>;
+extern template class SequenceRange<std::size_t>;
+extern template class SequenceBarrier<std::size_t>;
+extern template class MultiProducerSequencer<std::size_t>;
+extern template class SingleProducerSequencer<std::size_t>;
+
+} // namespace boost::asio::awaitable_ext
+
 namespace nats_coro {
 
 using namespace boost::asio;

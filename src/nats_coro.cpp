@@ -1,51 +1,50 @@
 #include "nats_coro.h"
+#include "connect_to_nats.h"
+#include "queue.h"
 
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/connect.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/write.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 
-#include <boost/json/value.hpp>
-#include <boost/json/serialize.hpp>
-#include <boost/json/parse.hpp>
+#include <boost/noncopyable.hpp>
 
 #include <format>
+#include <optional>
 
 namespace nats_coro {
 
-namespace json = boost::json;
-using namespace experimental::awaitable_operators;
-
-json::value build_handshake(const json::value& srvConfig, std::string_view token) {
-    return {{"auth_token", token}};
-}
-
-auto connect_to_nats(std::string_view host,
-                     std::string_view port,
-                     std::string_view token) -> awaitable<ip::tcp::socket>
+class Client : public IClient, boost::noncopyable
 {
-    auto executor = co_await this_coro::executor;
-    auto resolver = ip::tcp::resolver(executor);
-    auto endpoints = co_await resolver.async_resolve(host, port, use_awaitable);
-    auto socket = ip::tcp::socket(executor);
-    co_await async_connect(socket, endpoints, use_awaitable);
+public:
+    Client(ip::tcp::socket socket, std::size_t txBufferSize = 64) : _socket{std::move(socket)} {}
 
-    std::string buf;
-    co_await async_read_until(socket, dynamic_buffer(buf), "\r\n", use_awaitable);
-    auto data = std::string_view(buf);
+    awaitable<void> run() override;
 
-    auto head = std::string_view("INFO ");
-    data.remove_prefix(head.size());
-    json::value srvInfo = json::parse(data);
+    awaitable<void> publish(std::string_view subject,
+                            std::string_view payload) override;
 
-    std::string reply = std::format("CONNECT {}\r\n",
-                                    json::serialize(build_handshake(srvInfo,
-                                                                    token)));
-    co_await async_write(socket, buffer(reply), use_awaitable);
+private:
+    ip::tcp::socket _socket;
 
-    co_return socket;
+    using TXQueueFront = std::decay_t<decltype(std::get<0>(make_queue_mp<std::string>(0)))>;
+    using TXQueueBack = std::decay_t<decltype(std::get<1>(make_queue_mp<std::string>(0)))>;
+
+    std::optional<TXQueueFront> _txQueueFront;
+
+    awaitable<void> rx();
+    awaitable<void> tx(TXQueueBack&&);
+
+    awaitable<std::string> get_message();
+    awaitable<void> pong();
+};
+
+awaitable<std::shared_ptr<IClient>> createClient(std::string_view url) {
+    auto socket = co_await connect_to_nats(url);
+    co_return std::make_shared<Client>(std::move(socket));
 }
+
+using namespace experimental::awaitable_operators;
 
 awaitable<void> Client::run()
 {
@@ -60,7 +59,7 @@ awaitable<void> Client::rx()
     for (;;) {
         auto msg = co_await get_message();
         if (msg == "PING\r\n") {
-            co_await async_write(_socket, buffer("PONG\r\n"), use_awaitable);
+            co_await pong();
         }
     }
 }
@@ -77,14 +76,6 @@ awaitable<void> Client::tx(TXQueueBack&& txQueueBack)
     }
 }
 
-awaitable<std::string> Client::get_message()
-{
-    std::string buf;
-    std::size_t size = co_await async_read_until(_socket, dynamic_buffer(buf), "\r\n", use_awaitable);
-    buf.resize(size);
-    co_return buf;
-}
-
 awaitable<void> Client::publish(std::string_view subject,
                                 std::string_view payload)
 {
@@ -93,6 +84,19 @@ awaitable<void> Client::publish(std::string_view subject,
                                      std::to_string(payload.size()),
                                      payload);
     co_await _txQueueFront->push(std::move(packet));
+}
+
+awaitable<std::string> Client::get_message()
+{
+    std::string buf;
+    std::size_t size = co_await async_read_until(_socket, dynamic_buffer(buf), "\r\n", use_awaitable);
+    buf.resize(size);
+    co_return buf;
+}
+
+awaitable<void> Client::pong()
+{
+    co_await _txQueueFront->push(std::string("PONG\r\n"));
 }
 
 } // namespace nats_coro

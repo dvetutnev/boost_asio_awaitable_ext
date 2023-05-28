@@ -2,7 +2,10 @@
 
 with pkgs; let
   developEnv = (overrideCC stdenv gcc13);
-  boost = boost182;
+  boost = enableDebugging (boost182.override {
+      stdenv = developEnv;
+      enableDebug = true;
+  });
 in
   mkShell.override { stdenv = developEnv; } {
     name = "developEnv";
@@ -11,7 +14,10 @@ in
       cmake-format
     ];
     inputsFrom = [
-      (callPackage ./default.nix { stdenv = developEnv; inherit boost;})
+      (callPackage ./default.nix {
+          stdenv = developEnv;
+          inherit boost;
+      })
     ];
   }
 

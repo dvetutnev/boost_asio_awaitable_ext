@@ -1,44 +1,25 @@
 #include "nats_coro.h"
 #include "event.h"
 #include "utils.h"
+#include "connect_to_nats.h"
 
-#include <boost/asio.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/read_until.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 
 #include <boost/test/unit_test.hpp>
 
 namespace nats_coro::test {
 
-using namespace boost::asio;
 using namespace boost::asio::awaitable_ext;
 using namespace boost::asio::experimental::awaitable_operators;
 
 using namespace std::chrono_literals;
 
 BOOST_AUTO_TEST_SUITE(nats_coro);
-
-BOOST_AUTO_TEST_CASE(_)
-{
-    auto main = [](std::string_view host,
-                   std::string_view port,
-                   std::string_view token) -> awaitable<void>
-    {
-        ip::tcp::socket socket = co_await connect_to_nats(host, port, token);
-        co_await async_write(socket, buffer("PUB a.b 2\r\n79\r\n"), use_awaitable);
-
-        std::string buf;
-        co_await async_read_until(socket, dynamic_buffer(buf), "\r\n", use_awaitable);
-        std::cout << buf << std::endl;
-    };
-
-    auto ioContext = io_context();
-    co_spawn(ioContext, main("localhost", "4222", "token"), rethrow_handler);
-    ioContext.run();
-}
 
 namespace {
 
@@ -79,7 +60,7 @@ BOOST_AUTO_TEST_CASE(mock)
 {
     auto client = []() -> awaitable<void>
     {
-        auto socket = co_await connect_to_nats("localhost", "4223", "token");
+        auto socket = co_await connect_to_nats("nats://token@localhost:4223");
         std::string buf;
         std::size_t size = co_await async_read_until(socket, dynamic_buffer(buf), "\r\n", use_awaitable);
         buf.resize(size);
@@ -105,8 +86,8 @@ BOOST_AUTO_TEST_CASE(reply_on_ping)
 
     auto client = [&]() -> awaitable<void>
     {
-        auto client = Client(co_await connect_to_nats("localhost", "4223", "token"));
-        auto result = co_await(client.run() || stop.wait(use_awaitable));
+        auto client = co_await createClient("nats://token@localhost:4223");
+        auto result = co_await(client->run() || stop.wait(use_awaitable));
         BOOST_TEST(result.index() == 1); // stop win
     };
 
@@ -131,13 +112,13 @@ BOOST_AUTO_TEST_CASE(first_publish)
     {
         Event stop;
 
-        auto client = Client(co_await connect_to_nats("localhost", "4222", "token"));
+        auto client = co_await createClient("nats://token@localhost:4222");
         co_spawn(
             co_await this_coro::executor,
-            [&]() -> awaitable<void> { auto result = co_await(client.run() || stop.wait(use_awaitable)); BOOST_TEST(result.index() == 1); },
+            [&]() -> awaitable<void> { auto result = co_await(client->run() || stop.wait(use_awaitable)); BOOST_TEST(result.index() == 1); },
             rethrow_handler);
 
-        co_await client.publish("a.b", "First publish");
+        co_await client->publish("a.b", "First publish");
         co_await async_sleep(100ms);
         stop.set();
     };
@@ -149,4 +130,4 @@ BOOST_AUTO_TEST_CASE(first_publish)
 
 BOOST_AUTO_TEST_SUITE_END();
 
-} // namespace nats_coro
+} // namespace nats_coro::test

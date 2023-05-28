@@ -4,6 +4,7 @@
 #include "sequence_traits.h"
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 
