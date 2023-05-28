@@ -49,7 +49,10 @@ auto connect_to_nats(std::string_view host,
 
 awaitable<void> Client::run()
 {
-    co_await (rx() || tx());
+    auto [front, back] = make_queue_mp<std::string>(64);
+    _txQueueFront.emplace(std::move(front));
+
+    co_await (rx() || tx(std::move(back)));
 }
 
 awaitable<void> Client::rx()
@@ -62,15 +65,15 @@ awaitable<void> Client::rx()
     }
 }
 
-awaitable<void> Client::tx()
+awaitable<void> Client::tx(TXQueueBack&& txQueueBack)
 {
     for (;;) {
-        awaitable_ext::SequenceRange<std::size_t> range = co_await _txQueue.get();
+        awaitable_ext::SequenceRange<std::size_t> range = co_await txQueueBack.get();
         for (std::size_t seq : range) {
-            auto buf = buffer(_txQueue[seq]);
+            auto buf = buffer(txQueueBack[seq]);
             co_await async_write(_socket, buf, use_awaitable);
         }
-        _txQueue.consume(range);
+        txQueueBack.consume(range);
     }
 }
 
@@ -89,8 +92,7 @@ awaitable<void> Client::publish(std::string_view subject,
                                      subject,
                                      std::to_string(payload.size()),
                                      payload);
-
-    co_await _txQueue.push(std::move(packet));
+    co_await _txQueueFront->push(std::move(packet));
 }
 
 } // namespace nats_coro
