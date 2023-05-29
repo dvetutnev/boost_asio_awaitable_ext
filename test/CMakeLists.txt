@@ -13,6 +13,8 @@ add_executable(
   test_concepts.cpp
   test_queue.cpp
   test_connect_to_nats.cpp
+  test_message.cpp
+  test_subscribe.cpp
   utils.cpp
   main.cpp)
 target_link_libraries(tests PRIVATE ${PROJECT_NAME} Boost::unit_test_framework)

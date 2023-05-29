@@ -13,6 +13,7 @@ in
       gdb
       cmake-format
     ];
+    hardeningDisable = [ "all" ];
     inputsFrom = [
       (callPackage ./default.nix {
           stdenv = developEnv;
