@@ -5,76 +5,57 @@
 
 namespace nats_coro::test {
 
-BOOST_AUTO_TEST_SUITE(tests_Message);
+BOOST_AUTO_TEST_SUITE(tests_parse_msg_);
 
-BOOST_AUTO_TEST_CASE(_)
+BOOST_AUTO_TEST_CASE(without_reply_to)
 {
-    {
-        Message msg = Message::parse("MSG a.b 42 7\r\npayload\r\n");
-        BOOST_TEST(msg[Field::op_name] == "MSG");
-        BOOST_TEST(msg[Field::subject] == "a.b");
-        BOOST_TEST(msg[Field::subscribe_id] == "42");
-        BOOST_TEST(msg[Field::payload] == "payload");
-    }
-    {
-        Message msg = Message::parse("MSG c.d _id 4\r\ndata\r\n");
-        BOOST_TEST(msg[Field::op_name] == "MSG");
-        BOOST_TEST(msg[Field::subject] == "c.d");
-        BOOST_TEST(msg[Field::subscribe_id] == "_id");
-        BOOST_TEST(msg[Field::payload] == "data");
-    }
+    auto res = parse_msg("MSG a.b 42 7\r\n1234567\r\n");
+    BOOST_TEST(res.op_name() == "MSG");
+    BOOST_TEST(res.subject() == "a.b");
+    BOOST_TEST(res.subscribe_id() == "42");
+    BOOST_TEST(res.reply_to().empty());
+    BOOST_TEST(res.payload_size() == 7);
 }
 
-BOOST_AUTO_TEST_CASE(reply_to)
+BOOST_AUTO_TEST_CASE(with_reply_to)
 {
-    Message msg = Message::parse("MSG e.f subid reply.to 11\r\nHello world\r\n");
-    BOOST_TEST(msg[Field::op_name] == "MSG");
-    BOOST_TEST(msg[Field::subject] == "e.f");
-    BOOST_TEST(msg[Field::subscribe_id] == "subid");
-    BOOST_TEST(msg[Field::reply_to] == "reply.to");
-    BOOST_TEST(msg[Field::payload] == "Hello world");
+    auto res = parse_msg("MSG c.d subid reply.to 99\r\nddddddddddd");
+    BOOST_TEST(res.op_name() == "MSG");
+    BOOST_TEST(res.subject() == "c.d");
+    BOOST_TEST(res.subscribe_id() == "subid");
+    BOOST_TEST(res.reply_to() == "reply.to");
+    BOOST_TEST(res.payload_size() == 99);
 }
 
-BOOST_AUTO_TEST_CASE(bad_size)
+BOOST_AUTO_TEST_CASE(invalid_payload_size)
 {
-    try {
-        Message::parse("MSG x.y.z sub79 1i\r\nhello world\r\n");
-        BOOST_FAIL("Exception not throwed");
-    } catch (const boost::system::system_error& ex) {
-        std::cout << ex.what() << std::endl;
-    }
-}
-
-BOOST_AUTO_TEST_CASE(empty)
-{
-    try {
-        Message::parse(std::string{});
-        BOOST_FAIL("Exception not throwed");
-    } catch (const boost::system::system_error& ex) {
-        std::cout << ex.what() << std::endl;
-    }
-}
-
-BOOST_AUTO_TEST_CASE(not_complete)
-{
-    try {
-        Message::parse("MSG a.b 42 11\r\nhello w..\r\n");
-        BOOST_FAIL("Exception not throwed");
-    } catch (const boost::system::system_error& ex) {
-        std::cout << ex.what() << std::endl;
-    }
-}
-
-BOOST_AUTO_TEST_CASE(to_long)
-{
-    try {
-        Message::parse("MSG a.b 42 11\r\nhello world!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
-        BOOST_FAIL("Exception not throwed");
-    } catch (const boost::system::system_error& ex) {
-        std::cout << ex.what() << std::endl;
-    }
+    BOOST_CHECK_THROW(parse_msg("MSG c.c id i0\r\n"), boost::system::system_error);
+    BOOST_CHECK_THROW(parse_msg("MSG c.c id reply.to i0\r\n"), boost::system::system_error);
+    BOOST_CHECK_THROW(parse_msg("MSG c.c id 1o\r\n"), boost::system::system_error);
+    BOOST_CHECK_THROW(parse_msg("MSG c.c id reply.to 1o\r\n"), boost::system::system_error);
 }
 
 BOOST_AUTO_TEST_SUITE_END();
+
+BOOST_AUTO_TEST_CASE(tests_ControlLineView_default_ctor)
+{
+    auto res = ControlLineView();
+    BOOST_TEST(res.op_name().empty());
+    BOOST_TEST(res.subject().empty());
+    BOOST_TEST(res.subscribe_id().empty());
+    BOOST_TEST(res.reply_to().empty());
+    BOOST_TEST(res.payload_size() == 0);
+}
+
+BOOST_AUTO_TEST_CASE(tests_make_message_)
+{
+    auto packet = make_message("MSG q.w ID to.reply 9\r\n123456789\r\n");
+    BOOST_TEST(packet.head().op_name() == "MSG");
+    BOOST_TEST(packet.head().subject() == "q.w");
+    BOOST_TEST(packet.head().subscribe_id() == "ID");
+    BOOST_TEST(packet.head().reply_to() == "to.reply");
+    BOOST_TEST(packet.head().payload_size() == 9);
+    BOOST_TEST(packet.payload() == "123456789");
+}
 
 } // namespace nats_coro::test

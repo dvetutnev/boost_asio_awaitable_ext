@@ -93,7 +93,7 @@ BOOST_AUTO_TEST_CASE(back_close_dtor)
     co_spawn(ioContext, test_push_after_close(front), rethrow_handler);
     ioContext.run();
 }
-
+/*
 namespace test_move {
 auto [front, back] = make_queue_sp<char>(64);
 //auto frontCopied = front;
@@ -107,7 +107,7 @@ auto frontCopied = front;
 //auto backCopied = back;
 auto frontMoved = std::move(front);
 auto backMoved = std::move(back);
-}
+}*/
 
 BOOST_AUTO_TEST_SUITE_END();
 

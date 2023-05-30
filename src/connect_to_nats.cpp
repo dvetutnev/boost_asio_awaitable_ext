@@ -3,9 +3,8 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/write.hpp>
-#include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/use_awaitable.hpp>
 
-#include <boost/json/value.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/json/parse.hpp>
 
@@ -16,7 +15,6 @@
 namespace nats_coro {
 
 namespace json = boost::json;
-using namespace experimental::awaitable_operators;
 
 auto connect_to_nats(std::string_view url) -> awaitable<ip::tcp::socket>
 {
@@ -28,7 +26,14 @@ auto connect_to_nats(std::string_view url) -> awaitable<ip::tcp::socket>
 }
 
 json::value build_handshake(const json::value& srvConfig, std::string_view token) {
-    return {{"auth_token", token}};
+    return {
+        {"verbose", false},
+        {"pedantic", true},
+        {"tls_required", false},
+        {"auth_token", token},
+        {"lang", "C++23"},
+        {"version", "0.1"}
+    };
 }
 
 auto connect_to_nats(std::string_view host,
@@ -37,12 +42,19 @@ auto connect_to_nats(std::string_view host,
 {
     auto executor = co_await this_coro::executor;
     auto resolver = ip::tcp::resolver(executor);
-    auto endpoints = co_await resolver.async_resolve(host, port, use_awaitable);
+    auto endpoints = co_await resolver.async_resolve(host,
+                                                     port,
+                                                     use_awaitable);
     auto socket = ip::tcp::socket(executor);
-    co_await async_connect(socket, endpoints, use_awaitable);
+    co_await async_connect(socket,
+                           endpoints,
+                           use_awaitable);
 
     std::string buf;
-    co_await async_read_until(socket, dynamic_buffer(buf), "\r\n", use_awaitable);
+    co_await async_read_until(socket,
+                              dynamic_buffer(buf),
+                              "\r\n",
+                              use_awaitable);
     auto data = std::string_view(buf);
 
     auto head = std::string_view("INFO ");
@@ -52,7 +64,9 @@ auto connect_to_nats(std::string_view host,
     std::string reply = std::format("CONNECT {}\r\n",
                                     json::serialize(build_handshake(srvInfo,
                                                                     token)));
-    co_await async_write(socket, buffer(reply), use_awaitable);
+    co_await async_write(socket,
+                         buffer(reply),
+                         use_awaitable);
 
     co_return socket;
 }
