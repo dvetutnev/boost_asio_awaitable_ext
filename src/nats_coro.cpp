@@ -151,15 +151,51 @@ TXMessage Client::make_unsub_tx_message(std::string subId)
     };
 }
 
+struct Unsub::Impl
+{
+    auto push() -> awaitable<void>
+    {
+        bool isFirst = !std::exchange(_pushed, true);
+        if (isFirst) {
+            co_await _txQueue.push(std::move(_msg));
+        }
+    }
+
+    ~Impl()
+    {
+        if (_pushed) {
+            return;
+        }
+        try {
+            auto push = [](TXQueueFront& queue, TXMessage msg) -> awaitable<void>
+            {
+                co_await queue.push(std::move(msg));
+            };
+            co_spawn(_executor,
+                     push(_txQueue, std::move(_msg)),
+                     detached);
+        }
+        catch (...) {}
+    }
+
+    TXMessage _msg;
+    TXQueueFront& _txQueue;
+    any_io_executor _executor;
+
+    bool _pushed = false;
+};
+
+awaitable<void> Unsub::operator()()
+{
+    return _impl->push();
+}
+
 Unsub Client::make_unsub(TXMessage&& txMsg)
 {
-    auto push_unsub = [this,
-                       txMsg = std::move(txMsg)]() mutable -> awaitable<void>
-    {
-        co_await _txQueueFront->push(std::move(txMsg));
-    };
-
-    return Unsub{std::move(push_unsub)};
+    auto impl = std::make_shared<Unsub::Impl>(std::move(txMsg),
+                                              *_txQueueFront,
+                                              _socket.get_executor());
+    return Unsub{std::move(impl)};
 }
 
 awaitable<void> Client::run()

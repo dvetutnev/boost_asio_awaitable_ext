@@ -150,13 +150,18 @@ BOOST_AUTO_TEST_CASE(first_transfer)
     {
         auto client = co_await createClient(natsUrl);
         auto [sub, _] = co_await client->subscribe("f.t");
-        start.set();
-        auto res = co_await(client->run() ||
-                             sub.async_resume(use_awaitable));
+        auto subWrap = [&]() -> awaitable<std::optional<Message>>
+        {
+            co_await async_sleep(50ms); // wait delivery 'SUB' to NATS
+            start.set();
+            co_return co_await sub.async_resume(use_awaitable);
+        };
+        auto res = co_await(client->run() || subWrap());
         stop.set();
-
         BOOST_REQUIRE(res.index() == 1);
+
         auto msg = std::get<1>(std::move(res));
+        BOOST_REQUIRE(msg.has_value());
         BOOST_TEST(msg->head().subject() == "f.t");
         BOOST_TEST(msg->head().payload_size() == 4);
         BOOST_TEST(msg->payload() == "data");
@@ -169,7 +174,7 @@ BOOST_AUTO_TEST_CASE(first_transfer)
         co_await client->publish("f.t", "data");
         auto res = co_await(client->run() ||
                              stop.wait(use_awaitable));
-        BOOST_TEST(res.index() == 1); // timer win
+        BOOST_TEST(res.index() == 1); // stop win
     };
 
     auto ioContext = io_context();
@@ -229,9 +234,61 @@ BOOST_AUTO_TEST_CASE(unsub)
     ioContext.run();
 }
 
+BOOST_AUTO_TEST_CASE(unsub_dtor)
+{
+    Event stop;
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto [sub, unsub] = co_await client->subscribe("d.u.s");
+        auto wrapUnsub = std::make_optional(std::move(unsub));
+        wrapUnsub.reset();
+        auto result = co_await(client->run() ||
+                                stop.wait(use_awaitable));
+        BOOST_TEST(result.index() == 1); // stop win
+    };
+
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        auto reader = line_reader(socket);
+
+        std::optional<std::string> msg;
+        std::string subscribeId;
+
+        msg = co_await reader.async_resume(use_awaitable);
+        BOOST_REQUIRE(msg);
+        {
+            std::vector<std::string> chunks;
+            boost::split(chunks, *msg, boost::algorithm::is_space());
+            BOOST_TEST(chunks[0] == "SUB");
+            BOOST_TEST(chunks[1] == "d.u.s");
+            subscribeId = chunks[2];
+            BOOST_TEST(!subscribeId.empty());
+        }
+
+        msg = co_await reader.async_resume(use_awaitable);
+        BOOST_REQUIRE(msg);
+        {
+            std::vector<std::string> chunks;
+            boost::split(chunks, *msg, boost::algorithm::is_space());
+            BOOST_TEST(chunks[0] == "UNSUB");
+            BOOST_TEST(chunks[1] == subscribeId);
+        }
+
+        stop.set();
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, client(), rethrow_handler);
+    co_spawn(ioContext, server(), rethrow_handler);
+    ioContext.run();
+}
+
 BOOST_AUTO_TEST_CASE(uniquie_subscribe)
 {
-    Event start, stop, published;
+    Event start, stop;
 
     auto consumer = [&]() -> awaitable<void>
     {

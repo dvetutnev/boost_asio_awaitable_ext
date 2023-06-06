@@ -15,16 +15,10 @@ using experimental::coro;
 
 struct Unsub
 {
-    awaitable<void> operator()() {
-        co_await std::move(*_push_unsub)();
-    }
+    awaitable<void> operator()();
 
-    ~Unsub() {}
-
-    using Func = std::move_only_function<awaitable<void>()>;
-    explicit Unsub(Func push_unsub) : _push_unsub{std::make_shared<Func>(std::move(push_unsub))} {}
-
-    std::shared_ptr<Func> _push_unsub;
+    struct Impl;
+    std::shared_ptr<Impl> _impl;
 };
 
 class IClient
