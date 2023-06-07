@@ -15,16 +15,15 @@
 #include <boost/asio/experimental/use_coro.hpp>
 
 #include <boost/algorithm/string.hpp>
-
 #include <boost/url.hpp>
 
 #include <boost/test/unit_test.hpp>
-
 
 namespace nats_coro::test {
 
 using namespace awaitable_ext;
 using namespace experimental::awaitable_operators;
+using namespace buffer_literals;
 
 using experimental::coro;
 using experimental::use_coro;
@@ -105,7 +104,7 @@ BOOST_AUTO_TEST_CASE(reply_on_ping)
         auto reader = line_reader(socket);
         for (int i = 0; i < 3; i++) {
             co_await async_write(socket,
-                                 buffer("PING\r\n"),
+                                 "PING\r\n"_buf,
                                  use_awaitable);
             auto msg = co_await reader.async_resume(use_awaitable);
             BOOST_REQUIRE(msg);
@@ -172,6 +171,47 @@ BOOST_AUTO_TEST_CASE(first_transfer)
         co_await start.wait(use_awaitable);
         auto client = co_await createClient(natsUrl);
         co_await client->publish("f.t", "data");
+        auto res = co_await(client->run() ||
+                             stop.wait(use_awaitable));
+        BOOST_TEST(res.index() == 1); // stop win
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(payload_contains_delimiter)
+{
+    Event start, stop;
+
+    auto consumer = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        auto [sub, _] = co_await client->subscribe("r.n");
+        auto subWrap = [&]() -> awaitable<std::optional<Message>>
+        {
+            co_await async_sleep(50ms); // wait delivery 'SUB' to NATS
+            start.set();
+            co_return co_await sub.async_resume(use_awaitable);
+        };
+        auto res = co_await(client->run() || subWrap());
+        stop.set();
+        BOOST_REQUIRE(res.index() == 1);
+
+        auto msg = std::get<1>(std::move(res));
+        BOOST_REQUIRE(msg.has_value());
+        BOOST_TEST(msg->head().subject() == "r.n");
+        BOOST_TEST(msg->head().payload_size() == 7);
+        BOOST_TEST(msg->payload() == "A\r\nB\r\nC");
+    };
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        co_await start.wait(use_awaitable);
+        auto client = co_await createClient(natsUrl);
+        co_await client->publish("r.n", "A\r\nB\r\nC");
         auto res = co_await(client->run() ||
                              stop.wait(use_awaitable));
         BOOST_TEST(res.index() == 1); // stop win
@@ -286,7 +326,7 @@ BOOST_AUTO_TEST_CASE(unsub_dtor)
     ioContext.run();
 }
 
-BOOST_AUTO_TEST_CASE(uniquie_subscribe)
+BOOST_AUTO_TEST_CASE(uniquie_subscribe_unsub)
 {
     Event start, stop;
 
@@ -323,6 +363,55 @@ BOOST_AUTO_TEST_CASE(uniquie_subscribe)
         auto client = co_await createClient(natsUrl);
         co_await start.wait(use_awaitable);
         co_await client->publish("u.s", "79");
+        auto result = co_await(client->run() ||
+                                stop.wait(use_awaitable));
+        BOOST_TEST(result.index() == 1); // stop win
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(uniquie_subscribe)
+{
+    Event start, stop;
+
+    auto consumer = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        auto [sub1, _1] = co_await client->subscribe("42.43");
+        auto [sub2, _2] = co_await client->subscribe("42.43");
+
+        auto subWrap = [&]() -> awaitable<
+                                 std::tuple<std::optional<Message>,
+                                            std::optional<Message>>>
+        {
+            co_await async_sleep(50ms); // wait delivery 'SUB'
+            start.set();
+            co_return co_await(sub1.async_resume(use_awaitable) &&
+                                sub2.async_resume(use_awaitable));
+        };
+        auto res = co_await(client->run() || subWrap());
+        stop.set();
+        BOOST_REQUIRE(res.index() == 1); // sub`s first
+        auto [msg1, msg2] = std::get<1>(std::move(res));
+        BOOST_REQUIRE(msg1.has_value());
+        BOOST_TEST(msg1->head().subject() == "42.43");
+        BOOST_TEST(msg1->head().payload_size() == 3);
+        BOOST_TEST(msg1->payload() == "444");
+        BOOST_REQUIRE(msg2.has_value());
+        BOOST_TEST(msg2->head().subject() == "42.43");
+        BOOST_TEST(msg2->head().payload_size() == 3);
+        BOOST_TEST(msg2->payload() == "444");
+    };
+
+    auto producer = [&]() ->awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        co_await start.wait(use_awaitable);
+        co_await client->publish("42.43", "444");
         auto result = co_await(client->run() ||
                                 stop.wait(use_awaitable));
         BOOST_TEST(result.index() == 1); // stop win

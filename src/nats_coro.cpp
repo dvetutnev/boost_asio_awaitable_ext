@@ -2,10 +2,12 @@
 #include "connect_to_nats.h"
 #include "queue.h"
 #include "subscribe.h"
+#include "received.h"
 
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/streambuf.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/experimental/use_coro.hpp>
 #include <boost/asio/detached.hpp>
@@ -16,6 +18,8 @@
 #include <optional>
 #include <map>
 #include <iterator>
+
+#include <iostream> // tmp
 
 namespace nats_coro {
 
@@ -209,28 +213,34 @@ awaitable<void> Client::run()
 awaitable<void> Client::rx()
 {
     using namespace std::string_view_literals;
+    streambuf buffer;
 
     for (;;) {
-        std::string buffer;
-        std::size_t controlLineSize = co_await async_read_until(_socket,
-                                                                dynamic_buffer(buffer),
-                                                                "\r\n"sv,
-                                                                use_awaitable);
-        if (buffer.starts_with("MSG"sv))
+        std::size_t readed = co_await async_read_until(_socket,
+                                                       buffer,
+                                                       "\r\n"sv,
+                                                       use_awaitable);
+        BOOST_ASIO_CONST_BUFFER sb = buffer.data();
+        auto controlLine = std::string_view(static_cast<const char*>(sb.data()),
+                                            readed);
+
+        if (controlLine.starts_with("MSG"sv))
         {
-            ControlLineView head = parse_msg(buffer);
-            std::size_t totalMessageSize = buffer.size() + head.payload_size() + 2; // + \r\n
-            buffer.reserve(totalMessageSize);
+            ControlLineView head = parse_msg(controlLine);
+            std::size_t payloadOffset = controlLine.size();
+            std::size_t totalMsgSize = payloadOffset + head.payload_size() + "\r\n"sv.size();
 
-            std::size_t payloadLineSize = co_await async_read_until(_socket,
-                                                                    dynamic_buffer(buffer),
-                                                                    "\r\n"sv,
-                                                                    use_awaitable);
+            readed = co_await async_read_until(_socket,
+                                               buffer,
+                                               received(totalMsgSize),
+                                               use_awaitable);
 
-            auto payload = std::make_pair(controlLineSize,
-                                          std::min(head.payload_size(),
-                                                   payloadLineSize - 2)); // without \r\n
-            assert(payload.second == head.payload_size());
+            auto payload = std::make_pair(payloadOffset,
+                                          head.payload_size());
+
+            auto begin = buffers_begin(buffer.data());
+            auto data = std::string(begin,
+                                    begin + totalMsgSize);
 
             // Add comporator for lookup by string_view
             // https://stackoverflow.com/questions/69678864/safe-way-to-use-string-view-as-key-in-unordered-map
@@ -238,16 +248,15 @@ awaitable<void> Client::rx()
                 it != std::end(_subscribes))
             {
                 auto& queueFront = it->second;
-                co_await queueFront.push(Message{std::move(buffer), head, payload});
+                co_await queueFront.push(Message{std::move(data), head, payload});
             }
-
-
-            //co_await _subscribes->push(Message{std::move(buffer), head, payload});
         }
-        else if (buffer.starts_with("PING"sv))
+        else if (controlLine.starts_with("PING"sv))
         {
             co_await pong();
         }
+
+        buffer.consume(readed);
     }
 }
 
