@@ -11,6 +11,8 @@
 
 namespace nats_coro::test {
 
+using namespace buffer_literals;
+
 BOOST_AUTO_TEST_SUITE(nats_coro);
 
 BOOST_AUTO_TEST_CASE(_)
@@ -20,11 +22,7 @@ BOOST_AUTO_TEST_CASE(_)
                    std::string_view token) -> awaitable<void>
     {
         ip::tcp::socket socket = co_await connect_to_nats(host, port, token);
-        co_await async_write(socket, buffer("PUB a.b 2\r\n79\r\n"), use_awaitable);
-
-        std::string buf;
-        co_await async_read_until(socket, dynamic_buffer(buf), "\r\n", use_awaitable);
-        std::cout << buf << std::endl;
+        co_await async_write(socket, "PUB a.b 2\r\nQQ\r\n"_buf, use_awaitable);
     };
 
     auto ioContext = io_context();

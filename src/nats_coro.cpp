@@ -52,10 +52,13 @@ public:
 
     awaitable<Subscribe> subscribe(std::string_view subject) override;
 
+    awaitable<void> shutdown() override;
+
 private:
     ip::tcp::socket _socket;
 
     std::atomic_size_t _subscribes_count;
+    std::atomic_bool _isShutdown;
 
     std::optional<TXQueueFront> _txQueueFront;
     std::optional<TXQueueBack> _txQueueBack;
@@ -73,6 +76,7 @@ private:
                                   SubQueueFront&& queueFront);
     TXMessage make_unsub_tx_message(std::string subId);
     Unsub make_unsub(TXMessage&&);
+    TXMessage make_shutdown_tx_message();
 };
 
 awaitable<std::shared_ptr<IClient>> createClient(std::string_view url) {
@@ -83,7 +87,8 @@ awaitable<std::shared_ptr<IClient>> createClient(std::string_view url) {
 Client::Client(ip::tcp::socket&& socket)
     :
     _socket{std::move(socket)},
-    _subscribes_count{0}
+    _subscribes_count{0},
+    _isShutdown{false}
 {
     auto [front, back] = make_queue_mp<TXMessage>(64);
     _txQueueFront.emplace(std::move(front));
@@ -146,6 +151,7 @@ TXMessage Client::make_unsub_tx_message(std::string subId)
                 try {
                     SubQueueFront& queue = _subscribes.find(subId)->second;
                     co_await queue.push(Message{}); // push EOF
+                    // need delete from containaer
                 } catch (const boost::system::system_error& ex) {
                     // queue back maybe destroyed
                     assert(ex.code() == error::operation_aborted);
@@ -220,6 +226,7 @@ awaitable<void> Client::rx()
                                                        buffer,
                                                        "\r\n"sv,
                                                        use_awaitable);
+        // A single contiguous character array
         BOOST_ASIO_CONST_BUFFER sb = buffer.data();
         auto controlLine = std::string_view(static_cast<const char*>(sb.data()),
                                             readed);
@@ -228,7 +235,9 @@ awaitable<void> Client::rx()
         {
             ControlLineView head = parse_msg(controlLine);
             std::size_t payloadOffset = controlLine.size();
-            std::size_t totalMsgSize = payloadOffset + head.payload_size() + "\r\n"sv.size();
+            std::size_t totalMsgSize = payloadOffset +
+                                       head.payload_size() +
+                                       "\r\n"sv.size();
 
             readed = co_await async_read_until(_socket,
                                                buffer,
@@ -247,8 +256,8 @@ awaitable<void> Client::rx()
             if (auto it = _subscribes.find(std::string{head.subscribe_id()});
                 it != std::end(_subscribes))
             {
-                auto& queueFront = it->second;
-                co_await queueFront.push(Message{std::move(data), head, payload});
+                auto& queue = it->second;
+                co_await queue.push(Message{std::move(data), head, payload});
             }
         }
         else if (controlLine.starts_with("PING"sv))
@@ -262,19 +271,25 @@ awaitable<void> Client::rx()
 
 awaitable<void> Client::tx(TXQueueBack txQueueBack)
 {
-    for (;;) {
+    bool isStopping = false;
+    do {
         auto range = co_await txQueueBack.get();
         for (std::size_t seq : range)
         {
             TXMessage& msg = txQueueBack[seq];
             msg.before_send();
-            co_await async_write(_socket,
-                                 buffer(msg.content),
-                                 use_awaitable);
+            if (msg.content.empty()) {
+                isStopping = true;
+            } else {
+                co_await async_write(_socket,
+                                     buffer(msg.content),
+                                     use_awaitable);
+            }
             co_await msg.after_send();
         }
         txQueueBack.consume(range);
-    }
+    } while (!isStopping ||
+             !_subscribes.empty());
 }
 
 awaitable<void> Client::pong()
@@ -285,6 +300,30 @@ awaitable<void> Client::pong()
 std::string Client::generate_subscribe_id()
 {
     return std::to_string(_subscribes_count.fetch_add(1, std::memory_order_relaxed));
+}
+
+TXMessage Client::make_shutdown_tx_message()
+{
+    return {._after_send = [this]() -> awaitable<void>
+    {
+        for (auto& [_, queue] : _subscribes)
+        {
+            try {
+                co_await queue.push(Message{}); // push EOF
+                // need delete from containaer
+            } catch (const boost::system::system_error& ex) {
+                // queue back maybe destroyed
+                assert(ex.code() == error::operation_aborted);
+            }
+        }
+    }
+    };
+}
+
+awaitable<void> Client::shutdown()
+{
+    co_await _txQueueFront->push(make_shutdown_tx_message());
+    //_isShutdown.store(true, std::memory_)
 }
 
 } // namespace nats_coro

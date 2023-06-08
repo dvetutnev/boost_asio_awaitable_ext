@@ -15,6 +15,7 @@
 #include <boost/asio/experimental/use_coro.hpp>
 
 #include <boost/algorithm/string.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/url.hpp>
 
 #include <boost/test/unit_test.hpp>
@@ -29,8 +30,6 @@ using experimental::coro;
 using experimental::use_coro;
 
 using namespace std::chrono_literals;
-
-BOOST_AUTO_TEST_SUITE(nats_coro);
 
 namespace {
 
@@ -85,6 +84,8 @@ auto line_reader(ip::tcp::socket& socket) -> coro<std::string>
 }
 
 } // Anonymous namespace
+
+BOOST_AUTO_TEST_SUITE(nats_coro);
 
 BOOST_AUTO_TEST_CASE(reply_on_ping)
 {
@@ -423,6 +424,216 @@ BOOST_AUTO_TEST_CASE(uniquie_subscribe)
     ioContext.run();
 }
 
-BOOST_AUTO_TEST_SUITE_END();
+namespace {
+struct Watchdog
+{
+    Watchdog(std::chrono::milliseconds timeout)
+        :
+        _timeout{timeout},
+        _deadline{std::chrono::steady_clock::now() + timeout}
+    {}
+
+    awaitable<void> operator()()
+    {
+        auto timer = steady_timer(co_await this_coro::executor);
+        auto now = std::chrono::steady_clock::now();
+        while (_deadline > now)
+        {
+            timer.expires_at(_deadline);
+            co_await timer.async_wait(use_awaitable);
+            now = std::chrono::steady_clock::now();
+        }
+    }
+
+    void touch() {
+        _deadline = std::chrono::steady_clock::now() + _timeout;
+    }
+
+    std::chrono::milliseconds _timeout;
+    std::chrono::steady_clock::time_point _deadline;
+};
+}
+
+BOOST_AUTO_TEST_SUITE(shutdown)
+
+BOOST_AUTO_TEST_CASE(test_Watchdog)
+{
+    auto timer = Watchdog(50ms);
+
+    auto consumer = [&]() -> awaitable<void>
+    {
+        auto start = std::chrono::steady_clock::now();
+        co_await timer();
+        auto end = std::chrono::steady_clock::now();
+        BOOST_TEST((end - start) > (50ms * 3));
+        BOOST_TEST((end - start) < (50ms * 4));
+    };
+
+    auto producer = [&]() -> awaitable<void>
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            co_await async_sleep(47ms);
+            timer.touch();
+        }
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, consumer(), rethrow_handler);
+    co_spawn(ioContext, producer(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(flush_tx_queue, * boost::unit_test::disabled())
+{
+    std::size_t publishedCount = 0;
+    auto timer = Watchdog(50ms);
+    bool stopPublish = false;
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto publish = [&]() -> awaitable<void>
+        {
+            while (!stopPublish) {
+                auto payload  = std::to_string(++publishedCount);
+                co_await client->publish("p.s", payload);
+                timer.touch();
+            }
+            co_await client->shutdown();
+        };
+        co_await(client->run() && publish());
+    };
+
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await timer();
+        stopPublish = true;
+        BOOST_TEST_CHECKPOINT("timer fired, publishedCount=" << publishedCount);
+        std::size_t receivedLinesCount = 0;
+        std::optional<std::string> line;
+        auto reader = line_reader(socket);
+        do {
+            line = co_await reader.async_resume(use_awaitable);
+        } while(++receivedLinesCount < publishedCount * 2 &&
+                 line.has_value());
+        BOOST_TEST(line.has_value());
+        auto lastVal = std::stoull(*line);
+        BOOST_TEST(lastVal == publishedCount);
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, client(), rethrow_handler);
+    co_spawn(ioContext, server(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(send_unsub)
+{
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto [_, unsub] = co_await client->subscribe("s.u");
+        co_await client->shutdown();
+        co_await unsub();
+        co_await client->run();
+    };
+
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        auto reader = line_reader(socket);
+        std::optional<std::string> line;
+        line = co_await reader.async_resume(use_awaitable);
+        BOOST_REQUIRE(!!line);
+        BOOST_TEST(line->starts_with("SUB s.u"));
+        line = co_await reader.async_resume(use_awaitable);
+        BOOST_REQUIRE(!!line);
+        BOOST_TEST(line->starts_with("UNSUB"));
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, client(), rethrow_handler);
+    co_spawn(ioContext, server(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(eof_sub)
+{
+    bool subStopping = false;
+    auto main = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        auto [sub, unsub] = co_await client->subscribe("e.s");
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            auto val = co_await sub.async_resume(use_awaitable);
+            BOOST_TEST(!val);
+            co_await unsub();
+            subStopping = true;
+        };
+        co_await client->shutdown();
+        co_await (client->run() && subscribe());
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, main(), rethrow_handler);
+    ioContext.run();
+
+    BOOST_TEST(subStopping);
+}
+
+BOOST_AUTO_TEST_SUITE_END(); // shutdown
+
+namespace {
+
+auto consumer(std::uint64_t& sum) -> awaitable<void>
+{
+    auto client = co_await createClient(natsUrl);
+    auto subscribe = [&]() -> awaitable<void>
+    {
+        auto [sub, unsub] = co_await client->subscribe("y.g");
+        while (auto msg = co_await sub.async_resume(use_awaitable))
+        {
+            auto val = boost::lexical_cast<std::uint64_t>(msg->payload());
+            if (val == 0) {
+                break;
+            }
+            sum += val;
+        }
+        co_await unsub();
+    };
+    co_await (client->run() || subscribe());
+}
+
+auto producer(std::size_t iterationCount) -> awaitable<void>
+{
+    auto client = co_await createClient(natsUrl);
+    for (std::size_t i = 1; i <= iterationCount; i++)
+    {
+        co_await client->publish("y.g", std::to_string(i));
+    }
+    co_await client->publish("y.g", "0");
+}
+
+} // Anonymous namespace
+
+BOOST_AUTO_TEST_CASE(transfer, * boost::unit_test::disabled())
+{
+    constexpr std::size_t iterationCount = 3;
+    std::uint64_t result = 0;
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, consumer(result), rethrow_handler);
+    co_spawn(ioContext, producer(iterationCount), rethrow_handler);
+    //ioContext.run();
+
+    constexpr std::uint64_t expectedResult =
+        static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
+    BOOST_TEST(result == expectedResult);
+}
+
+BOOST_AUTO_TEST_SUITE_END(); // nats_coro
 
 } // namespace nats_coro::test

@@ -60,7 +60,7 @@ ControlLineView parse_msg(std::string_view);
 class Message
 {
 public:
-    ControlLineView head() const { return _head; }
+    const ControlLineView& head() const { return _head; }
     std::string_view payload() const { return {_data.data() + _payload.first,
                                                _payload.second}; }
 

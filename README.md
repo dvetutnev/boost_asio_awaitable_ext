@@ -5,7 +5,7 @@ Additional synchronization primitives for [boost::asio::awaitable](https://www.b
 Based on [cppcoro](https://github.com/lewissbaker/cppcoro).
 
 # Requirements
- * C++23 complier (GCC 12)
+ * C++23 complier (GCC 13)
  * CMake
  * Boost
 
