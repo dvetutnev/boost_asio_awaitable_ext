@@ -57,7 +57,7 @@ public:
 private:
     ip::tcp::socket _socket;
 
-    std::atomic_size_t _subscribes_count;
+    std::atomic_size_t _subscribe_id_counter;
     std::atomic_bool _isShutdown;
 
     std::optional<TXQueueFront> _txQueueFront;
@@ -87,7 +87,7 @@ awaitable<std::shared_ptr<IClient>> createClient(std::string_view url) {
 Client::Client(ip::tcp::socket&& socket)
     :
     _socket{std::move(socket)},
-    _subscribes_count{0},
+    _subscribe_id_counter{0},
     _isShutdown{false}
 {
     auto [front, back] = make_queue_mp<TXMessage>(64);
@@ -98,6 +98,9 @@ Client::Client(ip::tcp::socket&& socket)
 awaitable<void> Client::publish(std::string_view subject,
                                 std::string_view payload)
 {
+    if (_isShutdown.load(std::memory_order_acquire)) {
+        throw boost::system::system_error{error::operation_aborted};
+    }
     std::string content = std::format("PUB {} {}\r\n{}\r\n",
                                       subject,
                                       payload.size(),
@@ -151,7 +154,6 @@ TXMessage Client::make_unsub_tx_message(std::string subId)
                 try {
                     SubQueueFront& queue = _subscribes.find(subId)->second;
                     co_await queue.push(Message{}); // push EOF
-                    // need delete from containaer
                 } catch (const boost::system::system_error& ex) {
                     // queue back maybe destroyed
                     assert(ex.code() == error::operation_aborted);
@@ -210,6 +212,7 @@ Unsub Client::make_unsub(TXMessage&& txMsg)
 
 awaitable<void> Client::run()
 {
+    assert(co_await this_coro::executor == _socket.get_executor());
     co_await (
         rx() ||
         tx(std::move(*_txQueueBack))
@@ -299,7 +302,7 @@ awaitable<void> Client::pong()
 
 std::string Client::generate_subscribe_id()
 {
-    return std::to_string(_subscribes_count.fetch_add(1, std::memory_order_relaxed));
+    return std::to_string(_subscribe_id_counter.fetch_add(1, std::memory_order_relaxed));
 }
 
 TXMessage Client::make_shutdown_tx_message()
@@ -310,7 +313,6 @@ TXMessage Client::make_shutdown_tx_message()
         {
             try {
                 co_await queue.push(Message{}); // push EOF
-                // need delete from containaer
             } catch (const boost::system::system_error& ex) {
                 // queue back maybe destroyed
                 assert(ex.code() == error::operation_aborted);
@@ -322,8 +324,11 @@ TXMessage Client::make_shutdown_tx_message()
 
 awaitable<void> Client::shutdown()
 {
+    bool isAlready = _isShutdown.exchange(true, std::memory_order_acquire);
+    if (isAlready) {
+        co_return;
+    }
     co_await _txQueueFront->push(make_shutdown_tx_message());
-    //_isShutdown.store(true, std::memory_)
 }
 
 } // namespace nats_coro

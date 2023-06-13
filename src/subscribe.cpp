@@ -16,6 +16,7 @@ auto subscription(any_io_executor executor, SubQueueBack queue) -> coro<Message>
             }
             co_yield std::move(msg);
         }
+        queue.consume(range);
     } while (!end);
 }
 

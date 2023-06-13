@@ -9,11 +9,13 @@ struct received
 
     auto operator()(auto begin, auto end)
     {
-        _received += std::distance(begin, end);
+        auto distance = std::distance(begin, end);
+        _received += distance;
         if (_received < _totalSize) {
             return std::make_pair(end, false);
         } else {
-            auto it = begin + (_received - _totalSize);
+            std::size_t tailSize = _received - _totalSize;
+            auto it = begin + distance - tailSize;
             return std::make_pair(it, true);
         }
     };

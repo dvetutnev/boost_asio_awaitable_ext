@@ -584,6 +584,26 @@ BOOST_AUTO_TEST_CASE(eof_sub)
     BOOST_TEST(subStopping);
 }
 
+BOOST_AUTO_TEST_CASE(disable_publish)
+{
+    auto main = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        auto publish = [&]() -> awaitable<void>
+        {
+            BOOST_CHECK_EXCEPTION(co_await client->publish("d.p", "ff"),
+                                  boost::system::system_error,
+                                  [](const auto& ex){ return ex.code() == error::operation_aborted; });
+        };
+        co_await client->shutdown();
+        co_await (client->run() && publish());
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, main(), rethrow_handler);
+    ioContext.run();
+}
+
 BOOST_AUTO_TEST_SUITE_END(); // shutdown
 
 namespace {
@@ -600,34 +620,40 @@ auto consumer(std::uint64_t& sum) -> awaitable<void>
             if (val == 0) {
                 break;
             }
-            sum += val;
+            sum += val; std::cout << "val: " << val << std::endl;
         }
         co_await unsub();
+        co_await client->shutdown();
     };
-    co_await (client->run() || subscribe());
+    co_await (client->run() && subscribe());
 }
 
 auto producer(std::size_t iterationCount) -> awaitable<void>
 {
     auto client = co_await createClient(natsUrl);
-    for (std::size_t i = 1; i <= iterationCount; i++)
+    auto publish = [&]() -> awaitable<void>
     {
-        co_await client->publish("y.g", std::to_string(i));
-    }
-    co_await client->publish("y.g", "0");
+        for (std::size_t i = 1; i <= iterationCount; i++)
+        {
+            co_await client->publish("y.g", std::to_string(i));
+        }
+        co_await client->publish("y.g", "0");
+        co_await client->shutdown();
+    };
+    co_await (client->run() && publish());
 }
 
 } // Anonymous namespace
 
-BOOST_AUTO_TEST_CASE(transfer, * boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(transfer)
 {
-    constexpr std::size_t iterationCount = 3;
+    constexpr std::size_t iterationCount = 1000;
     std::uint64_t result = 0;
 
     auto ioContext = io_context();
     co_spawn(ioContext, consumer(result), rethrow_handler);
     co_spawn(ioContext, producer(iterationCount), rethrow_handler);
-    //ioContext.run();
+    ioContext.run();
 
     constexpr std::uint64_t expectedResult =
         static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
