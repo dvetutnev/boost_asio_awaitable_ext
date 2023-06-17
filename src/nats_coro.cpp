@@ -254,6 +254,7 @@ awaitable<void> Client::rx()
             auto begin = buffers_begin(buffer.data());
             auto data = std::string(begin,
                                     begin + totalMsgSize);
+            assert(data.ends_with("\r\n"));
 
             // Add comporator for lookup by string_view
             // https://stackoverflow.com/questions/69678864/safe-way-to-use-string-view-as-key-in-unordered-map

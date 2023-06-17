@@ -606,49 +606,48 @@ BOOST_AUTO_TEST_CASE(disable_publish)
 
 BOOST_AUTO_TEST_SUITE_END(); // shutdown
 
-namespace {
-
-auto consumer(std::uint64_t& sum) -> awaitable<void>
-{
-    auto client = co_await createClient(natsUrl);
-    auto subscribe = [&]() -> awaitable<void>
-    {
-        auto [sub, unsub] = co_await client->subscribe("y.g");
-        while (auto msg = co_await sub.async_resume(use_awaitable))
-        {
-            auto val = boost::lexical_cast<std::uint64_t>(msg->payload());
-            if (val == 0) {
-                break;
-            }
-            sum += val; std::cout << "val: " << val << std::endl;
-        }
-        co_await unsub();
-        co_await client->shutdown();
-    };
-    co_await (client->run() && subscribe());
-}
-
-auto producer(std::size_t iterationCount) -> awaitable<void>
-{
-    auto client = co_await createClient(natsUrl);
-    auto publish = [&]() -> awaitable<void>
-    {
-        for (std::size_t i = 1; i <= iterationCount; i++)
-        {
-            co_await client->publish("y.g", std::to_string(i));
-        }
-        co_await client->publish("y.g", "0");
-        co_await client->shutdown();
-    };
-    co_await (client->run() && publish());
-}
-
-} // Anonymous namespace
-
 BOOST_AUTO_TEST_CASE(transfer)
 {
     constexpr std::size_t iterationCount = 1000;
     std::uint64_t result = 0;
+    Event start;
+
+    auto consumer= [&](std::uint64_t& sum) -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            auto [sub, unsub] = co_await client->subscribe("y.g");
+            start.set();
+            while (auto msg = co_await sub.async_resume(use_awaitable))
+            {
+                auto val = boost::lexical_cast<std::uint64_t>(msg->payload());
+                if (val == 0) {
+                    break;
+                }
+                sum += val;
+            }
+            co_await unsub();
+            co_await client->shutdown();
+        };
+        co_await (client->run() && subscribe());
+    };
+
+    auto producer = [&](std::size_t iterationCount) -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        auto publish = [&]() -> awaitable<void>
+        {
+            co_await start.wait(use_awaitable);
+            for (std::size_t i = 1; i <= iterationCount; i++)
+            {
+                co_await client->publish("y.g", std::to_string(i));
+            }
+            co_await client->publish("y.g", "0");
+            co_await client->shutdown();
+        };
+        co_await (client->run() && publish());
+    };
 
     auto ioContext = io_context();
     co_spawn(ioContext, consumer(result), rethrow_handler);
