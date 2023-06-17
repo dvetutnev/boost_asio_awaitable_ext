@@ -246,6 +246,7 @@ awaitable<void> Client::rx()
                                                buffer,
                                                received(totalMsgSize),
                                                use_awaitable);
+            assert(readed == totalMsgSize);
 
             auto payload = std::make_pair(payloadOffset,
                                           head.payload_size());
