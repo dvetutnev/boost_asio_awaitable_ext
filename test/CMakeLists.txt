@@ -16,6 +16,7 @@ add_executable(
   test_message.cpp
   test_subscribe.cpp
   test_received.cpp
+  test_parallel_group.cpp
   utils.cpp
   main.cpp)
 target_link_libraries(tests PRIVATE ${PROJECT_NAME} Boost::unit_test_framework)

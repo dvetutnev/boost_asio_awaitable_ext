@@ -28,6 +28,8 @@ using namespace buffer_literals;
 
 using experimental::coro;
 using experimental::use_coro;
+using experimental::make_parallel_group;
+using experimental::wait_for_all;
 
 using namespace std::chrono_literals;
 
@@ -89,14 +91,12 @@ BOOST_AUTO_TEST_SUITE(nats_coro);
 
 BOOST_AUTO_TEST_CASE(reply_on_ping)
 {
-    Event stop;
+    std::shared_ptr<IClient> client;
 
-    auto client = [&]() -> awaitable<void>
+    auto clientTest = [&]() -> awaitable<void>
     {
-        auto client = co_await createClient(mockUrl);
-        auto result = co_await(client->run() ||
-                                stop.wait(use_awaitable));
-        BOOST_TEST(result.index() == 1); // stop win
+        client = co_await createClient(mockUrl);
+        BOOST_CHECK_NO_THROW(co_await client->run());
     };
 
     auto server = [&]() -> awaitable<void>
@@ -111,56 +111,33 @@ BOOST_AUTO_TEST_CASE(reply_on_ping)
             BOOST_REQUIRE(msg);
             BOOST_TEST(*msg == "PONG\r\n");
         }
-        stop.set();
+        co_await client->shutdown();
     };
 
     auto ioContext = io_context();
-    co_spawn(ioContext, client(), rethrow_handler);
+    co_spawn(ioContext, clientTest(), rethrow_handler);
     co_spawn(ioContext, server(), rethrow_handler);
-    ioContext.run();
-}
-
-BOOST_AUTO_TEST_CASE(first_publish)
-{
-    auto main = [&]() -> awaitable<void>
-    {
-        Event stop;
-
-        auto client = co_await createClient(natsUrl);
-        co_spawn(
-            co_await this_coro::executor,
-            [&]() -> awaitable<void> { auto result = co_await(client->run() || stop.wait(use_awaitable)); BOOST_TEST(result.index() == 1); },
-            rethrow_handler);
-
-        co_await client->publish("a.b", "First publish");
-        co_await async_sleep(100ms);
-        stop.set();
-    };
-
-    auto ioContext = io_context();
-    co_spawn(ioContext, main(), rethrow_handler);
     ioContext.run();
 }
 
 BOOST_AUTO_TEST_CASE(first_transfer)
 {
-    Event start, stop;
+    Event start;
 
     auto consumer = [&]() -> awaitable<void>
     {
         auto client = co_await createClient(natsUrl);
-        auto [sub, _] = co_await client->subscribe("f.t");
-        auto subWrap = [&]() -> awaitable<std::optional<Message>>
+        auto subscribe = [&]() -> awaitable<std::optional<Message>>
         {
-            co_await async_sleep(50ms); // wait delivery 'SUB' to NATS
+            auto [sub, unsub] = co_await client->subscribe("f.t");
+            co_await async_sleep(10ms); // wait delivery 'SUB' to NATS
             start.set();
-            co_return co_await sub.async_resume(use_awaitable);
+            auto res = co_await sub.async_resume(use_awaitable);
+            co_await unsub();
+            co_await client->shutdown();
+            co_return res;
         };
-        auto res = co_await(client->run() || subWrap());
-        stop.set();
-        BOOST_REQUIRE(res.index() == 1);
-
-        auto msg = std::get<1>(std::move(res));
+        auto msg = co_await(client->run() && subscribe());
         BOOST_REQUIRE(msg.has_value());
         BOOST_TEST(msg->head().subject() == "f.t");
         BOOST_TEST(msg->head().payload_size() == 4);
@@ -171,10 +148,12 @@ BOOST_AUTO_TEST_CASE(first_transfer)
     {
         co_await start.wait(use_awaitable);
         auto client = co_await createClient(natsUrl);
-        co_await client->publish("f.t", "data");
-        auto res = co_await(client->run() ||
-                             stop.wait(use_awaitable));
-        BOOST_TEST(res.index() == 1); // stop win
+        auto publish = [&]() -> awaitable<void>
+        {
+            co_await client->publish("f.t", "data");
+            co_await client->shutdown();
+        };
+        BOOST_CHECK_NO_THROW(co_await(client->run() && publish()));
     };
 
     auto ioContext = io_context();
@@ -190,18 +169,17 @@ BOOST_AUTO_TEST_CASE(payload_contains_delimiter)
     auto consumer = [&]() -> awaitable<void>
     {
         auto client = co_await createClient(natsUrl);
-        auto [sub, _] = co_await client->subscribe("r.n");
-        auto subWrap = [&]() -> awaitable<std::optional<Message>>
+        auto subscribe = [&]() -> awaitable<std::optional<Message>>
         {
-            co_await async_sleep(50ms); // wait delivery 'SUB' to NATS
+            auto [sub, unsub] = co_await client->subscribe("r.n");
+            co_await async_sleep(10ms); // wait delivery 'SUB' to NATS
             start.set();
-            co_return co_await sub.async_resume(use_awaitable);
+            auto res = co_await sub.async_resume(use_awaitable);
+            co_await unsub();
+            co_await client->shutdown();
+            co_return res;
         };
-        auto res = co_await(client->run() || subWrap());
-        stop.set();
-        BOOST_REQUIRE(res.index() == 1);
-
-        auto msg = std::get<1>(std::move(res));
+        auto msg = co_await(client->run() && subscribe());
         BOOST_REQUIRE(msg.has_value());
         BOOST_TEST(msg->head().subject() == "r.n");
         BOOST_TEST(msg->head().payload_size() == 7);
@@ -212,10 +190,12 @@ BOOST_AUTO_TEST_CASE(payload_contains_delimiter)
     {
         co_await start.wait(use_awaitable);
         auto client = co_await createClient(natsUrl);
-        co_await client->publish("r.n", "A\r\nB\r\nC");
-        auto res = co_await(client->run() ||
-                             stop.wait(use_awaitable));
-        BOOST_TEST(res.index() == 1); // stop win
+        auto publish = [&]() -> awaitable<void>
+        {
+            co_await client->publish("r.n", "A\r\nB\r\nC");
+            co_await client->shutdown();
+        };
+        BOOST_CHECK_NO_THROW(co_await(client->run() && publish()));
     };
 
     auto ioContext = io_context();
@@ -224,70 +204,16 @@ BOOST_AUTO_TEST_CASE(payload_contains_delimiter)
     ioContext.run();
 }
 
-BOOST_AUTO_TEST_CASE(unsub)
-{
-    Event stop;
-
-    auto client = [&]() -> awaitable<void>
-    {
-        auto client = co_await createClient(mockUrl);
-        auto [sub, unsub] = co_await client->subscribe("s.u");
-        co_await unsub();
-        auto result = co_await(client->run() ||
-                                stop.wait(use_awaitable));
-        BOOST_TEST(result.index() == 1); // stop win
-    };
-
-    auto server = [&]() -> awaitable<void>
-    {
-        auto socket = co_await mock_nats(mockUrl);
-        auto reader = line_reader(socket);
-
-        std::optional<std::string> msg;
-        std::string subscribeId;
-
-        msg = co_await reader.async_resume(use_awaitable);
-        BOOST_REQUIRE(msg);
-        {
-            std::vector<std::string> chunks;
-            boost::split(chunks, *msg, boost::algorithm::is_space());
-            BOOST_TEST(chunks[0] == "SUB");
-            BOOST_TEST(chunks[1] == "s.u");
-            subscribeId = chunks[2];
-            BOOST_TEST(!subscribeId.empty());
-        }
-
-        msg = co_await reader.async_resume(use_awaitable);
-        BOOST_REQUIRE(msg);
-        {
-            std::vector<std::string> chunks;
-            boost::split(chunks, *msg, boost::algorithm::is_space());
-            BOOST_TEST(chunks[0] == "UNSUB");
-            BOOST_TEST(chunks[1] == subscribeId);
-        }
-
-        stop.set();
-    };
-
-    auto ioContext = io_context();
-    co_spawn(ioContext, client(), rethrow_handler);
-    co_spawn(ioContext, server(), rethrow_handler);
-    ioContext.run();
-}
-
 BOOST_AUTO_TEST_CASE(unsub_dtor)
 {
-    Event stop;
-
     auto client = [&]() -> awaitable<void>
     {
         auto client = co_await createClient(mockUrl);
         auto [sub, unsub] = co_await client->subscribe("d.u.s");
         auto wrapUnsub = std::make_optional(std::move(unsub));
         wrapUnsub.reset();
-        auto result = co_await(client->run() ||
-                                stop.wait(use_awaitable));
-        BOOST_TEST(result.index() == 1); // stop win
+        co_await client->shutdown();
+        BOOST_CHECK_NO_THROW(co_await client->run());
     };
 
     auto server = [&]() -> awaitable<void>
@@ -317,8 +243,6 @@ BOOST_AUTO_TEST_CASE(unsub_dtor)
             BOOST_TEST(chunks[0] == "UNSUB");
             BOOST_TEST(chunks[1] == subscribeId);
         }
-
-        stop.set();
     };
 
     auto ioContext = io_context();
@@ -329,7 +253,7 @@ BOOST_AUTO_TEST_CASE(unsub_dtor)
 
 BOOST_AUTO_TEST_CASE(uniquie_subscribe_unsub)
 {
-    Event start, stop;
+    Event start;
 
     auto consumer = [&]() -> awaitable<void>
     {
@@ -339,19 +263,19 @@ BOOST_AUTO_TEST_CASE(uniquie_subscribe_unsub)
 
         co_await unsub1();
 
-        auto subWrap = [&]() -> awaitable<
+        auto subscribes = [&]() -> awaitable<
                                     std::tuple<std::optional<Message>,
                                                std::optional<Message>>>
         {
-            co_await async_sleep(50ms); // wait delivery 'SUB'/'UNSUB' to NATS
+            co_await async_sleep(10ms); // wait delivery 'SUB'/'UNSUB' to NATS
             start.set();
-            co_return co_await(sub1.async_resume(use_awaitable) &&
-                                sub2.async_resume(use_awaitable));
+            auto res = co_await(sub1.async_resume(use_awaitable) &&
+                                 sub2.async_resume(use_awaitable));
+            co_await unsub2();
+            co_await client->shutdown();
+            co_return res;
         };
-        auto res = co_await(client->run() || subWrap());
-        stop.set();
-        BOOST_REQUIRE(res.index() == 1); // sub`s first
-        auto [empty, msg] = std::get<1>(std::move(res));
+        auto [empty, msg] = co_await(client->run() && subscribes());
         BOOST_REQUIRE(msg.has_value());
         BOOST_TEST(msg->head().subject() == "u.s");
         BOOST_TEST(msg->head().payload_size() == 2);
@@ -363,10 +287,12 @@ BOOST_AUTO_TEST_CASE(uniquie_subscribe_unsub)
     {
         auto client = co_await createClient(natsUrl);
         co_await start.wait(use_awaitable);
-        co_await client->publish("u.s", "79");
-        auto result = co_await(client->run() ||
-                                stop.wait(use_awaitable));
-        BOOST_TEST(result.index() == 1); // stop win
+        auto publish = [&]() -> awaitable<void>
+        {
+            co_await client->publish("u.s", "79");
+            co_await client->shutdown();
+        };
+        BOOST_CHECK_NO_THROW(co_await (client->run() && publish()));
     };
 
     auto ioContext = io_context();
@@ -377,27 +303,28 @@ BOOST_AUTO_TEST_CASE(uniquie_subscribe_unsub)
 
 BOOST_AUTO_TEST_CASE(uniquie_subscribe)
 {
-    Event start, stop;
+    Event start;
 
     auto consumer = [&]() -> awaitable<void>
     {
         auto client = co_await createClient(natsUrl);
-        auto [sub1, _1] = co_await client->subscribe("42.43");
-        auto [sub2, _2] = co_await client->subscribe("42.43");
+        auto [sub1, unsub1] = co_await client->subscribe("42.43");
+        auto [sub2, unsub2] = co_await client->subscribe("42.43");
 
-        auto subWrap = [&]() -> awaitable<
+        auto subscribes = [&]() -> awaitable<
                                  std::tuple<std::optional<Message>,
                                             std::optional<Message>>>
         {
-            co_await async_sleep(50ms); // wait delivery 'SUB'
+            co_await async_sleep(10ms); // wait delivery 'SUB'
             start.set();
-            co_return co_await(sub1.async_resume(use_awaitable) &&
+            auto res = co_await(sub1.async_resume(use_awaitable) &&
                                 sub2.async_resume(use_awaitable));
+            co_await unsub1();
+            co_await unsub2();
+            co_await client->shutdown();
+            co_return res;
         };
-        auto res = co_await(client->run() || subWrap());
-        stop.set();
-        BOOST_REQUIRE(res.index() == 1); // sub`s first
-        auto [msg1, msg2] = std::get<1>(std::move(res));
+        auto [msg1, msg2] = co_await(client->run() && subscribes());
         BOOST_REQUIRE(msg1.has_value());
         BOOST_TEST(msg1->head().subject() == "42.43");
         BOOST_TEST(msg1->head().payload_size() == 3);
@@ -406,16 +333,19 @@ BOOST_AUTO_TEST_CASE(uniquie_subscribe)
         BOOST_TEST(msg2->head().subject() == "42.43");
         BOOST_TEST(msg2->head().payload_size() == 3);
         BOOST_TEST(msg2->payload() == "444");
+        BOOST_TEST(msg1->head().subscribe_id() != msg2->head().subscribe_id());
     };
 
     auto producer = [&]() ->awaitable<void>
     {
         auto client = co_await createClient(natsUrl);
         co_await start.wait(use_awaitable);
-        co_await client->publish("42.43", "444");
-        auto result = co_await(client->run() ||
-                                stop.wait(use_awaitable));
-        BOOST_TEST(result.index() == 1); // stop win
+        auto publish = [&]() -> awaitable<void>
+        {
+            co_await client->publish("42.43", "444");
+            co_await client->shutdown();
+        };
+        BOOST_CHECK_NO_THROW(co_await (client->run() && publish()));
     };
 
     auto ioContext = io_context();
@@ -537,7 +467,7 @@ BOOST_AUTO_TEST_CASE(send_unsub)
         auto [_, unsub] = co_await client->subscribe("s.u");
         co_await client->shutdown();
         co_await unsub();
-        co_await client->run();
+        BOOST_CHECK_NO_THROW(co_await client->run());
     };
 
     auto server = [&]() -> awaitable<void>
@@ -562,6 +492,7 @@ BOOST_AUTO_TEST_CASE(send_unsub)
 BOOST_AUTO_TEST_CASE(eof_sub)
 {
     bool subStopping = false;
+
     auto main = [&]() -> awaitable<void>
     {
         auto client = co_await createClient(natsUrl);
@@ -574,7 +505,7 @@ BOOST_AUTO_TEST_CASE(eof_sub)
             subStopping = true;
         };
         co_await client->shutdown();
-        co_await (client->run() && subscribe());
+        BOOST_CHECK_NO_THROW(co_await (client->run() && subscribe()));
     };
 
     auto ioContext = io_context();
@@ -596,7 +527,44 @@ BOOST_AUTO_TEST_CASE(disable_publish)
                                   [](const auto& ex){ return ex.code() == error::operation_aborted; });
         };
         co_await client->shutdown();
-        co_await (client->run() && publish());
+        BOOST_CHECK_NO_THROW(co_await (client->run() && publish()));
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, main(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(disable_subscribe)
+{
+    auto main = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            BOOST_CHECK_EXCEPTION(co_await client->subscribe("d.s"),
+                                  boost::system::system_error,
+                                  [](const auto& ex){ return ex.code() == error::operation_aborted; });
+        };
+        co_await client->shutdown();
+        BOOST_CHECK_NO_THROW(co_await (client->run() && subscribe()));
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, main(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(disable_repeat_run)
+{
+    auto main = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(natsUrl);
+        co_await client->shutdown();
+        BOOST_CHECK_NO_THROW(co_await client->run());
+        BOOST_CHECK_EXCEPTION(co_await client->run(),
+                              boost::system::system_error,
+                              [](const auto& ex){ return ex.code() == error::operation_aborted; });
     };
 
     auto ioContext = io_context();
@@ -608,7 +576,7 @@ BOOST_AUTO_TEST_SUITE_END(); // shutdown
 
 BOOST_AUTO_TEST_CASE(transfer)
 {
-    constexpr std::size_t iterationCount = 1000;
+    constexpr std::size_t iterationCount = 10000;
     std::uint64_t result = 0;
     Event start;
 
@@ -618,6 +586,7 @@ BOOST_AUTO_TEST_CASE(transfer)
         auto subscribe = [&]() -> awaitable<void>
         {
             auto [sub, unsub] = co_await client->subscribe("y.g");
+            co_await async_sleep(20ms); // wait delivery 'SUB'
             start.set();
             while (auto msg = co_await sub.async_resume(use_awaitable))
             {
@@ -630,7 +599,7 @@ BOOST_AUTO_TEST_CASE(transfer)
             co_await unsub();
             co_await client->shutdown();
         };
-        co_await (client->run() && subscribe());
+        BOOST_CHECK_NO_THROW(co_await (client->run() && subscribe()));
     };
 
     auto producer = [&](std::size_t iterationCount) -> awaitable<void>
@@ -646,7 +615,7 @@ BOOST_AUTO_TEST_CASE(transfer)
             co_await client->publish("y.g", "0");
             co_await client->shutdown();
         };
-        co_await (client->run() && publish());
+        BOOST_CHECK_NO_THROW(co_await (client->run() && publish()));
     };
 
     auto ioContext = io_context();
@@ -658,6 +627,383 @@ BOOST_AUTO_TEST_CASE(transfer)
         static_cast<std::uint64_t>(iterationCount) * static_cast<std::uint64_t>(1 + iterationCount) / 2;
     BOOST_TEST(result == expectedResult);
 }
+
+BOOST_AUTO_TEST_SUITE(error_handling)
+
+BOOST_AUTO_TEST_CASE(idle)
+{
+    Event start;
+
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        start.set();
+        try {
+            co_await client->run();
+            BOOST_FAIL("eXCEPTION not throwing");
+        } catch (const boost::system::system_error& ex) {
+            std::cout << "ex.code " << ex.code() << std::endl;
+            std::cout << "ex.what " << ex.what() << std::endl;
+        }
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(eof_sub)
+{
+    Event start;
+    bool subDone = false;
+
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            auto [sub, _] = co_await client->subscribe("e.s.d");
+            start.set();
+            auto msg = co_await sub.async_resume(use_awaitable);
+            BOOST_TEST(!msg.has_value());
+            subDone = true;
+        };
+        auto executor = co_await this_coro::executor;
+        auto [order, runEx, subEx] = co_await make_parallel_group(
+            co_spawn(executor, client->run(), deferred),
+            co_spawn(executor, subscribe(), deferred))
+                                         .async_wait(wait_for_all(), deferred);
+        BOOST_CHECK_THROW(std::rethrow_exception(runEx),
+                          boost::system::system_error);
+        BOOST_TEST(!subEx);
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+
+    BOOST_TEST(subDone);
+}
+
+BOOST_AUTO_TEST_CASE(publish)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "PING\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto publish = [&]() -> awaitable<void>
+        {
+            start.set();
+            co_await client->publish("pub.on.disconnect", "dAta");
+        };
+        auto executor = co_await this_coro::executor;
+        auto [order, runEx, subEx] = co_await make_parallel_group(
+                                         co_spawn(executor, client->run(), deferred),
+                                         co_spawn(executor, publish(), deferred))
+                                         .async_wait(wait_for_all(), deferred);
+        BOOST_CHECK_THROW(std::rethrow_exception(runEx),
+                          boost::system::system_error);
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(unsub)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "PING\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            auto [_, unsub] = co_await client->subscribe("disconnect.on.unsub");
+            start.set();
+            co_await unsub();
+        };
+        auto executor = co_await this_coro::executor;
+        auto [order, runEx, subEx] = co_await make_parallel_group(
+                                         co_spawn(executor, client->run(), deferred),
+                                         co_spawn(executor, subscribe(), deferred))
+                                         .async_wait(wait_for_all(), deferred);
+        BOOST_CHECK_THROW(std::rethrow_exception(runEx),
+                          boost::system::system_error);
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(disable_subscribe)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "PING\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        start.set();
+        BOOST_CHECK_THROW(co_await client->run(),
+                          boost::system::system_error);
+        BOOST_CHECK_EXCEPTION(co_await client->subscribe("disable.subscribe.after.disconnect"),
+                              boost::system::system_error,
+                              [](const auto& ex) { return ex.code() == error::operation_aborted; });
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(disable_publish)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "PING\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        start.set();
+        BOOST_CHECK_THROW(co_await client->run(),
+                          boost::system::system_error);
+        BOOST_CHECK_EXCEPTION(co_await client->publish("disable.publish", "after.disconnect"),
+                              boost::system::system_error,
+                              [](const auto& ex) { return ex.code() == error::operation_aborted; });
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(disable_repeat_run)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "PING\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        start.set();
+        BOOST_CHECK_THROW(co_await client->run(),
+                          boost::system::system_error);
+        BOOST_CHECK_THROW(co_await client->run(),
+                          boost::system::system_error);
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_SUITE(ERR);
+
+BOOST_AUTO_TEST_CASE(_)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "-ERR 'Stale Connection'\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        start.set();
+        BOOST_CHECK_EXCEPTION(co_await client->run(),
+                              boost::system::system_error,
+                              [](const auto& ex)
+                              {
+                                  BOOST_TEST(ex.code() == error::eof);
+                                  auto what = std::string_view(ex.what());
+                                  BOOST_TEST(what.contains("Stale Connection"));
+                                  return true;
+                              });
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(eof_sub)
+{
+    Event start, stop;
+    bool subDone = false;
+
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "-ERR 'Stale Connection'\r\n"_buf, use_awaitable);
+        co_await stop.wait(use_awaitable);
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            auto [sub, _] = co_await client->subscribe("e.s.ERR");
+            start.set();
+            auto msg = co_await sub.async_resume(use_awaitable);
+            BOOST_TEST(!msg.has_value());
+            subDone = true;
+        };
+        auto executor = co_await this_coro::executor;
+        auto [order, runEx, subEx] = co_await make_parallel_group(
+                                         co_spawn(executor, client->run(), deferred),
+                                         co_spawn(executor, subscribe(), deferred))
+                                         .async_wait(wait_for_all(), deferred);
+        BOOST_CHECK_THROW(std::rethrow_exception(runEx),
+                          boost::system::system_error);
+        BOOST_TEST(!subEx);
+        stop.set();
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+
+    BOOST_TEST(subDone);
+}
+
+BOOST_AUTO_TEST_CASE(unsub)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "-ERR 'Stale Connection'\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            auto [_, unsub] = co_await client->subscribe("ERR.on.unsub");
+            start.set();
+            co_await unsub();
+        };
+        auto executor = co_await this_coro::executor;
+        auto [order, runEx, subEx] = co_await make_parallel_group(
+                                         co_spawn(executor, client->run(), deferred),
+                                         co_spawn(executor, subscribe(), deferred))
+                                         .async_wait(wait_for_all(), deferred);
+        BOOST_CHECK_THROW(std::rethrow_exception(runEx),
+                          boost::system::system_error);
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(unsub2)
+{
+    Event start, stop;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "-ERR 'Stale Connection'\r\n"_buf, use_awaitable);
+        co_await stop.wait(use_awaitable);
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto subscribe = [&]() -> awaitable<void>
+        {
+            auto [_, unsub] = co_await client->subscribe("ERR.on.unsub");
+            start.set();
+            co_await unsub();
+        };
+        auto executor = co_await this_coro::executor;
+        auto [order, runEx, subEx] = co_await make_parallel_group(
+                                         co_spawn(executor, client->run(), deferred),
+                                         co_spawn(executor, subscribe(), deferred))
+                                         .async_wait(wait_for_all(), deferred);
+        BOOST_CHECK_THROW(std::rethrow_exception(runEx),
+                          boost::system::system_error);
+        stop.set();
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_SUITE_END(); // ERR
+
+BOOST_AUTO_TEST_SUITE_END(); // error_handling
 
 BOOST_AUTO_TEST_SUITE_END(); // nats_coro
 

@@ -25,6 +25,9 @@ namespace nats_coro {
 
 using namespace experimental::awaitable_operators;
 using experimental::use_coro;
+using experimental::make_parallel_group;
+using experimental::wait_for_one;
+using experimental::wait_for_one_error;
 
 struct TXMessage
 {
@@ -59,6 +62,7 @@ private:
 
     std::atomic_size_t _subscribe_id_counter;
     std::atomic_bool _isShutdown;
+    awaitable_ext::Event _shutdownEvent;
 
     std::optional<TXQueueFront> _txQueueFront;
     std::optional<TXQueueBack> _txQueueBack;
@@ -110,6 +114,9 @@ awaitable<void> Client::publish(std::string_view subject,
 
 awaitable<IClient::Subscribe> Client::subscribe(std::string_view subject)
 {
+    if (_isShutdown.load(std::memory_order_acquire)) {
+        throw boost::system::system_error{error::operation_aborted};
+    }
     std::string subId = generate_subscribe_id();
     auto [front, back] = make_queue_sp<Message>(64);
 
@@ -212,11 +219,52 @@ Unsub Client::make_unsub(TXMessage&& txMsg)
 
 awaitable<void> Client::run()
 {
-    assert(co_await this_coro::executor == _socket.get_executor());
-    co_await (
-        rx() ||
-        tx(std::move(*_txQueueBack))
-    );
+    if (!_socket.is_open()) {
+        throw boost::system::system_error{error::operation_aborted};
+    }
+    auto executor = _socket.get_executor();
+
+    auto rxWrap = [this]() -> awaitable<void>
+    {
+        auto executor = co_await this_coro::executor;
+        auto [order, rxEx, shutdownEc] = co_await make_parallel_group(
+            co_spawn(executor, rx(), deferred),
+            _shutdownEvent.wait(deferred))
+                                             .async_wait(wait_for_one(), deferred);
+
+        if (order[0] == 0) {
+            assert(!!rxEx); // rx() first only with net error
+            std::rethrow_exception(rxEx);
+        }
+    };
+
+    auto [order, rxEx, txEx] = co_await make_parallel_group(
+        co_spawn(executor, rxWrap(), deferred),
+        co_spawn(executor, tx(std::move(*_txQueueBack)), deferred))
+                                   .async_wait(wait_for_one_error(), deferred);
+
+    {
+        boost::system::error_code dummy;
+        _socket.shutdown(ip::tcp::socket::shutdown_both, dummy);
+        _socket.close();
+    }
+
+    for (auto& [_, queue] : _subscribes)
+    {
+        try {
+            co_await queue.push(Message{}); // push EOF
+        } catch (const boost::system::system_error& ex) {
+            // queue back maybe destroyed
+            assert(ex.code() == error::operation_aborted);
+        }
+    }
+
+    if (order[0] == 0 && rxEx) {
+        std::rethrow_exception(rxEx);
+    }
+    if (order[0] == 1 && txEx) {
+        std::rethrow_exception(txEx);
+    }
 }
 
 awaitable<void> Client::rx()
@@ -248,26 +296,31 @@ awaitable<void> Client::rx()
                                                use_awaitable);
             assert(readed == totalMsgSize);
 
-            auto payload = std::make_pair(payloadOffset,
-                                          head.payload_size());
-
             auto begin = buffers_begin(buffer.data());
             auto data = std::string(begin,
                                     begin + totalMsgSize);
             assert(data.ends_with("\r\n"));
+            auto payload = std::make_pair(payloadOffset,
+                                          head.payload_size());
+            auto msg = Message(std::move(data), head, payload);
 
+            // From msg because head storage maybe not valid
+            auto subId = msg.head().subscribe_id();
             // Add comporator for lookup by string_view
             // https://stackoverflow.com/questions/69678864/safe-way-to-use-string-view-as-key-in-unordered-map
-            if (auto it = _subscribes.find(std::string{head.subscribe_id()});
+            if (auto it = _subscribes.find(std::string{subId});
                 it != std::end(_subscribes))
             {
                 auto& queue = it->second;
-                co_await queue.push(Message{std::move(data), head, payload});
+                co_await queue.push(std::move(msg));
             }
         }
         else if (controlLine.starts_with("PING"sv))
         {
             co_await pong();
+        }
+        else if (controlLine.starts_with("-ERR")) {
+            throw boost::system::system_error{error::eof, std::string(controlLine)};
         }
 
         buffer.consume(readed);
@@ -330,6 +383,7 @@ awaitable<void> Client::shutdown()
     if (isAlready) {
         co_return;
     }
+    _shutdownEvent.set();
     co_await _txQueueFront->push(make_shutdown_tx_message());
 }
 
