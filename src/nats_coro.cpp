@@ -40,8 +40,8 @@ struct TXMessage
     std::move_only_function<awaitable<void>()> _after_send;
 };
 
-using TXQueueFront = std::decay_t<decltype(std::get<0>(make_queue_mp<TXMessage>(0)))>;
-using TXQueueBack = std::decay_t<decltype(std::get<1>(make_queue_mp<TXMessage>(0)))>;
+using TXQueueHead = std::decay_t<decltype(std::get<0>(make_queue_mp<TXMessage>(0)))>;
+using TXQueueTail = std::decay_t<decltype(std::get<1>(make_queue_mp<TXMessage>(0)))>;
 
 class Client : public IClient, boost::noncopyable
 {
@@ -64,20 +64,20 @@ private:
     std::atomic_bool _isShutdown;
     awaitable_ext::Event _shutdownEvent;
 
-    std::optional<TXQueueFront> _txQueueFront;
-    std::optional<TXQueueBack> _txQueueBack;
-
-    std::map<std::string, SubQueueFront> _subscribes;
+    std::optional<TXQueueHead> _txQueueHead;
+    std::optional<TXQueueTail> _txQueueTail;
+    
+    std::map<std::string, SubQueueHead> _subscribes;
 
     awaitable<void> rx();
-    awaitable<void> tx(TXQueueBack);
+    awaitable<void> tx(TXQueueTail);
 
     awaitable<void> pong();
 
     std::string generate_subscribe_id();
     TXMessage make_sub_tx_message(std::string_view subject,
                                   std::string subId,
-                                  SubQueueFront&& queueFront);
+                                  SubQueueHead&& queueFront);
     TXMessage make_unsub_tx_message(std::string subId);
     Unsub make_unsub(TXMessage&&);
     TXMessage make_shutdown_tx_message();
@@ -94,9 +94,9 @@ Client::Client(ip::tcp::socket&& socket)
     _subscribe_id_counter{0},
     _isShutdown{false}
 {
-    auto [front, back] = make_queue_mp<TXMessage>(64);
-    _txQueueFront.emplace(std::move(front));
-    _txQueueBack.emplace(std::move(back));
+    auto [head, tail] = make_queue_mp<TXMessage>(64);
+    _txQueueHead.emplace(std::move(head));
+    _txQueueTail.emplace(std::move(tail));
 }
 
 awaitable<void> Client::publish(std::string_view subject,
@@ -109,7 +109,7 @@ awaitable<void> Client::publish(std::string_view subject,
                                       subject,
                                       payload.size(),
                                       payload);
-    co_await _txQueueFront->push(TXMessage{std::move(content)});
+    co_await _txQueueHead->push(TXMessage{std::move(content)});
 }
 
 awaitable<IClient::Subscribe> Client::subscribe(std::string_view subject)
@@ -118,24 +118,24 @@ awaitable<IClient::Subscribe> Client::subscribe(std::string_view subject)
         throw boost::system::system_error{error::operation_aborted};
     }
     std::string subId = generate_subscribe_id();
-    auto [front, back] = make_queue_sp<Message>(64);
+    auto [head, tail] = make_queue_sp<Message>(64);
 
     TXMessage subMsg = make_sub_tx_message(subject,
                                            subId,
-                                           std::move(front));
+                                           std::move(head));
     TXMessage unsubMsg = make_unsub_tx_message(subId);
 
     coro<Message> sub = subscription(co_await this_coro::executor,
-                                     std::move(back));
+                                     std::move(tail));
     Unsub unsub = make_unsub(std::move(unsubMsg));
 
-    co_await _txQueueFront->push(std::move(subMsg));
+    co_await _txQueueHead->push(std::move(subMsg));
     co_return std::make_tuple(std::move(sub), std::move(unsub));
 }
 
 TXMessage Client::make_sub_tx_message(std::string_view subject,
                                       std::string subId,
-                                      SubQueueFront&& queueFront)
+                                      SubQueueHead&& queueFront)
 {
     return {.content = std::format("SUB {} {}\r\n",
                                    subject,
@@ -159,7 +159,7 @@ TXMessage Client::make_unsub_tx_message(std::string subId)
             {
                 assert(_subscribes.contains(subId));
                 try {
-                    SubQueueFront& queue = _subscribes.find(subId)->second;
+                    SubQueueHead& queue = _subscribes.find(subId)->second;
                     co_await queue.push(Message{}); // push EOF
                 } catch (const boost::system::system_error& ex) {
                     // queue back maybe destroyed
@@ -186,7 +186,7 @@ struct Unsub::Impl
             return;
         }
         try {
-            auto push = [](TXQueueFront& queue, TXMessage msg) -> awaitable<void>
+            auto push = [](TXQueueHead& queue, TXMessage msg) -> awaitable<void>
             {
                 co_await queue.push(std::move(msg));
             };
@@ -198,7 +198,7 @@ struct Unsub::Impl
     }
 
     TXMessage _msg;
-    TXQueueFront& _txQueue;
+    TXQueueHead& _txQueue;
     any_io_executor _executor;
 
     bool _pushed = false;
@@ -212,7 +212,7 @@ awaitable<void> Unsub::operator()()
 Unsub Client::make_unsub(TXMessage&& txMsg)
 {
     auto impl = std::make_shared<Unsub::Impl>(std::move(txMsg),
-                                              *_txQueueFront,
+                                              *_txQueueHead,
                                               _socket.get_executor());
     return Unsub{std::move(impl)};
 }
@@ -240,7 +240,7 @@ awaitable<void> Client::run()
 
     auto [order, rxEx, txEx] = co_await make_parallel_group(
         co_spawn(executor, rxWrap(), deferred),
-        co_spawn(executor, tx(std::move(*_txQueueBack)), deferred))
+                                   co_spawn(executor, tx(std::move(*_txQueueTail)), deferred))
                                    .async_wait(wait_for_one_error(), deferred);
 
     {
@@ -327,7 +327,7 @@ awaitable<void> Client::rx()
     }
 }
 
-awaitable<void> Client::tx(TXQueueBack txQueueBack)
+awaitable<void> Client::tx(TXQueueTail txQueueBack)
 {
     bool isStopping = false;
     do {
@@ -352,7 +352,7 @@ awaitable<void> Client::tx(TXQueueBack txQueueBack)
 
 awaitable<void> Client::pong()
 {
-    co_await _txQueueFront->push(TXMessage{"PONG\r\n"});
+    co_await _txQueueHead->push(TXMessage{"PONG\r\n"});
 }
 
 std::string Client::generate_subscribe_id()
@@ -384,7 +384,7 @@ awaitable<void> Client::shutdown()
         co_return;
     }
     _shutdownEvent.set();
-    co_await _txQueueFront->push(make_shutdown_tx_message());
+    co_await _txQueueHead->push(make_shutdown_tx_message());
 }
 
 } // namespace nats_coro

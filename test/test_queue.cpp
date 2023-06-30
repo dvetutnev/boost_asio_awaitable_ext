@@ -18,26 +18,26 @@ BOOST_AUTO_TEST_SUITE(tests_Queue);
 namespace {
 auto test_transfer(auto queues)
 {
-    auto [front, back] = std::move(queues);
+    auto [head, tail] = std::move(queues);
 
     auto producer = [&](std::uint64_t iterationCount) -> awaitable<void>
     {
         for (std::size_t i = 1; i <= iterationCount; i++) {
-            co_await front.push(std::size_t{i});
+            co_await head.push(std::size_t{i});
         }
-        co_await front.push(std::size_t{0});
+        co_await head.push(std::size_t{0});
     };
 
     auto consumer = [&](std::uint64_t& result) -> awaitable<void>
     {
         bool reachedEnd = false;
         do {
-            auto range = co_await back.get();
+            auto range = co_await tail.get();
             for (std::size_t seq : range) {
-                result += back[seq];
-                reachedEnd = back[seq] == 0;
+                result += tail[seq];
+                reachedEnd = tail[seq] == 0;
             }
-            back.consume(range);
+            tail.consume(range);
 
         } while (!reachedEnd);
     };
@@ -75,22 +75,22 @@ auto test_push_after_close(auto& front) -> awaitable<void>
 
 BOOST_AUTO_TEST_CASE(back_close)
 {
-    auto [front, back] = make_queue_sp<std::size_t>(64);
-    back.close();
+    auto [head, tail] = make_queue_sp<std::size_t>(64);
+    tail.close();
 
     auto ioContext = io_context();
-    co_spawn(ioContext, test_push_after_close(front), rethrow_handler);
+    co_spawn(ioContext, test_push_after_close(head), rethrow_handler);
     ioContext.run();
 }
 
 BOOST_AUTO_TEST_CASE(back_close_dtor)
 {
-    auto [front, back] = make_queue_sp<std::size_t>(64);
-    auto wrap = std::make_optional(std::move(back));
+    auto [head, tail] = make_queue_sp<std::size_t>(64);
+    auto wrap = std::make_optional(std::move(tail));
     wrap.reset();
 
     auto ioContext = io_context();
-    co_spawn(ioContext, test_push_after_close(front), rethrow_handler);
+    co_spawn(ioContext, test_push_after_close(head), rethrow_handler);
     ioContext.run();
 }
 /*
