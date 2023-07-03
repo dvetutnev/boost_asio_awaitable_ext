@@ -75,16 +75,16 @@ private:
 };
 
 template<typename T, awaitable_ext::IsSequencer<std::size_t> Sequencer>
-class QueueHead
+class QueueTail
 {
     struct Tag {};
     friend auto make_queue<T, Sequencer>(std::size_t);
 public:
-    explicit QueueHead(std::shared_ptr<QueueState<T, Sequencer>> state, Tag) : _state{std::move(state)} {}
-    QueueHead(QueueHead&) requires awaitable_ext::IsMultiProducer<Sequencer, std::size_t> = default;
-    QueueHead& operator=(QueueHead&) requires awaitable_ext::IsMultiProducer<Sequencer, std::size_t> = default;
-    QueueHead(QueueHead&&) = default;
-    QueueHead& operator=(QueueHead&&) = default;
+    explicit QueueTail(std::shared_ptr<QueueState<T, Sequencer>> state, Tag) : _state{std::move(state)} {}
+    QueueTail(QueueTail&) requires awaitable_ext::IsMultiProducer<Sequencer, std::size_t> = default;
+    QueueTail& operator=(QueueTail&) requires awaitable_ext::IsMultiProducer<Sequencer, std::size_t> = default;
+    QueueTail(QueueTail&&) = default;
+    QueueTail& operator=(QueueTail&&) = default;
 
     awaitable<void> push(T&& item) {
         std::size_t seq = co_await _state->claim_one();
@@ -97,17 +97,17 @@ private:
 };
 
 template<typename T, awaitable_ext::IsSequencer<std::size_t> Sequencer>
-class QueueTail
+class QueueHead
 {
     struct Tag {};
     friend auto make_queue<T, Sequencer>(std::size_t);
 public:
-    explicit QueueTail(std::shared_ptr<QueueState<T, Sequencer>> state, Tag) : _state{std::move(state)} {}
-    QueueTail(const QueueTail&) = delete;
-    QueueTail& operator=(const QueueTail&) = delete;
-    QueueTail(QueueTail&& tmp) : _state{std::move(tmp._state)} { tmp._state.reset(); }
-    QueueTail& operator=(QueueTail&& tmp) { _state = std::move(tmp._state); tmp._state.reset(); }
-    ~QueueTail() { try { close(); } catch(...) {} }
+    explicit QueueHead(std::shared_ptr<QueueState<T, Sequencer>> state, Tag) : _state{std::move(state)} {}
+    QueueHead(const QueueHead&) = delete;
+    QueueHead& operator=(const QueueHead&) = delete;
+    QueueHead(QueueHead&& tmp) : _state{std::move(tmp._state)} { tmp._state.reset(); }
+    QueueHead& operator=(QueueHead&& tmp) { _state = std::move(tmp._state); tmp._state.reset(); }
+    ~QueueHead() { try { close(); } catch(...) {} }
 
     awaitable<awaitable_ext::SequenceRange<std::size_t>> get() { return _state->get(); }
     T& operator[](std::size_t seq) { return (*_state)[seq]; }
@@ -123,12 +123,12 @@ template<typename T, awaitable_ext::IsSequencer<std::size_t> Sequencer>
 inline auto make_queue(std::size_t bufferSize)
 {
     using State = QueueState<T, Sequencer>;
-    using Front = QueueHead<T, Sequencer>;
-    using Back = QueueTail<T, Sequencer>;
+    using Head = QueueHead<T, Sequencer>;
+    using Tail = QueueTail<T, Sequencer>;
     auto state = std::make_shared<State>(bufferSize, typename State::Tag{});
     return std::make_tuple(
-        Front{state, typename Front::Tag{}},
-        Back{state, typename Back::Tag{}}
+        Head{state, typename Head::Tag{}},
+        Tail{state, typename Tail::Tag{}}
         );
 }
 

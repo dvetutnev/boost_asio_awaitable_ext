@@ -23,21 +23,21 @@ auto test_transfer(auto queues)
     auto producer = [&](std::uint64_t iterationCount) -> awaitable<void>
     {
         for (std::size_t i = 1; i <= iterationCount; i++) {
-            co_await head.push(std::size_t{i});
+            co_await tail.push(std::size_t{i});
         }
-        co_await head.push(std::size_t{0});
+        co_await tail.push(std::size_t{0});
     };
 
     auto consumer = [&](std::uint64_t& result) -> awaitable<void>
     {
         bool reachedEnd = false;
         do {
-            auto range = co_await tail.get();
+            auto range = co_await head.get();
             for (std::size_t seq : range) {
-                result += tail[seq];
-                reachedEnd = tail[seq] == 0;
+                result += head[seq];
+                reachedEnd = head[seq] == 0;
             }
-            tail.consume(range);
+            head.consume(range);
 
         } while (!reachedEnd);
     };
@@ -62,10 +62,10 @@ BOOST_AUTO_TEST_CASE(transfer_mp) { test_transfer(make_queue_mp<std::size_t>(64)
 BOOST_AUTO_TEST_CASE(transfer_sp) { test_transfer(make_queue_sp<std::size_t>(64)); }
 
 namespace {
-auto test_push_after_close(auto& front) -> awaitable<void>
+auto test_push_after_close(auto& queueTail) -> awaitable<void>
 {
     try {
-        co_await front.push(std::size_t{42});
+        co_await queueTail.push(std::size_t{42});
         BOOST_FAIL("Exception not throwing");
     } catch (const boost::system::system_error& ex) {
         BOOST_TEST(ex.code() == error::operation_aborted);
@@ -73,41 +73,26 @@ auto test_push_after_close(auto& front) -> awaitable<void>
 }
 } // Anonymous namespace
 
-BOOST_AUTO_TEST_CASE(back_close)
+BOOST_AUTO_TEST_CASE(head_close)
 {
     auto [head, tail] = make_queue_sp<std::size_t>(64);
-    tail.close();
+    head.close();
 
     auto ioContext = io_context();
-    co_spawn(ioContext, test_push_after_close(head), rethrow_handler);
+    co_spawn(ioContext, test_push_after_close(tail), rethrow_handler);
     ioContext.run();
 }
 
-BOOST_AUTO_TEST_CASE(back_close_dtor)
+BOOST_AUTO_TEST_CASE(head_close_dtor)
 {
     auto [head, tail] = make_queue_sp<std::size_t>(64);
-    auto wrap = std::make_optional(std::move(tail));
+    auto wrap = std::make_optional(std::move(head));
     wrap.reset();
 
     auto ioContext = io_context();
-    co_spawn(ioContext, test_push_after_close(head), rethrow_handler);
+    co_spawn(ioContext, test_push_after_close(tail), rethrow_handler);
     ioContext.run();
 }
-/*
-namespace test_move {
-auto [front, back] = make_queue_sp<char>(64);
-//auto frontCopied = front;
-//auto backCopied = back;
-auto frontMoved = std::move(front);
-auto backMoved = std::move(back);
-}
-namespace test_copy {
-auto [front, back] = make_queue_mp<char>(64);
-auto frontCopied = front;
-//auto backCopied = back;
-auto frontMoved = std::move(front);
-auto backMoved = std::move(back);
-}*/
 
 BOOST_AUTO_TEST_SUITE_END();
 

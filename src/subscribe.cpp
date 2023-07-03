@@ -3,7 +3,7 @@
 
 namespace nats_coro {
 
-auto subscription(any_io_executor executor, SubQueueTail queue) -> coro<Message>
+auto subscription(any_io_executor executor, SubQueueHead queue) -> coro<Message>
 {
     bool end = false;
     do {

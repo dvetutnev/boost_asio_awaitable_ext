@@ -21,23 +21,23 @@ BOOST_AUTO_TEST_SUITE(tests_Subscription);
 
 BOOST_AUTO_TEST_CASE(_)
 {
-    auto [front, back] = make_queue_sp<Message>(64);
+    auto [head, tail] = make_queue_sp<Message>(64);
 
     auto producer = [&]() -> awaitable<void>
     {
         for (char c : std::string("abc")) {
             auto msg = make_message(std::format("MSG kk.ss 42 1\r\n{}\r\n",
                                                 c));
-            co_await front.push(std::move(msg));
+            co_await tail.push(std::move(msg));
         }
-        co_await front.push(Message{});
+        co_await tail.push(Message{});
     };
 
     std::vector<std::string> result;
     auto consumer = [&]() -> awaitable<void>
     {
         auto sub = subscription(co_await this_coro::executor,
-                                std::move(back));
+                                std::move(head));
         while (auto msg = co_await sub.async_resume(use_awaitable)) {
             result.emplace_back(msg->payload());
         }
@@ -58,7 +58,7 @@ BOOST_AUTO_TEST_CASE(transfer)
     constexpr std::size_t iterationCount = 1'000'000;
     std::uint64_t result = 0;
 
-    auto [front, back] = make_queue_sp<Message>(64);
+    auto [head, tail] = make_queue_sp<Message>(64);
 
     auto producer = [&]() -> awaitable<void>
     {
@@ -71,15 +71,15 @@ BOOST_AUTO_TEST_CASE(transfer)
         };
 
         for (auto i = 1uz; i <= iterationCount; i++) {
-            co_await front.push(to_message(i));
+            co_await tail.push(to_message(i));
         }
-        co_await front.push(Message{});
+        co_await tail.push(Message{});
     };
 
     auto consumer = [&](std::uint64_t& sum) -> awaitable<void>
     {
         auto sub = subscription(co_await this_coro::executor,
-                                std::move(back));
+                                std::move(head));
         while (auto msg = co_await sub.async_resume(use_awaitable)) {
             sum += boost::lexical_cast<std::uint64_t>(msg->payload());
         }
