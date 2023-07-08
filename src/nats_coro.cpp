@@ -53,7 +53,8 @@ public:
     awaitable<void> publish(std::string_view subject,
                             std::string_view payload) override;
 
-    awaitable<Subscribe> subscribe(std::string_view subject) override;
+    awaitable<Subscribe> subscribe(any_io_executor executor,
+                                   std::string_view subject) override;
 
     awaitable<void> shutdown() override;
 
@@ -112,7 +113,8 @@ awaitable<void> Client::publish(std::string_view subject,
     co_await _txQueueTail->push(TXMessage{std::move(content)});
 }
 
-awaitable<IClient::Subscribe> Client::subscribe(std::string_view subject)
+awaitable<IClient::Subscribe> Client::subscribe(any_io_executor executor,
+                                                std::string_view subject)
 {
     if (_isShutdown.load(std::memory_order_acquire)) {
         throw boost::system::system_error{error::operation_aborted};
@@ -125,7 +127,7 @@ awaitable<IClient::Subscribe> Client::subscribe(std::string_view subject)
                                            std::move(queueTail));
     TXMessage unsubMsg = make_unsub_tx_message(subId);
 
-    coro<Message> sub = subscription(co_await this_coro::executor,
+    coro<Message> sub = subscription(executor,
                                      std::move(queueHead));
     Unsub unsub = make_unsub(std::move(unsubMsg));
 

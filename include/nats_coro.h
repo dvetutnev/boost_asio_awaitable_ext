@@ -30,7 +30,8 @@ public:
                                                   std::string_view payload) = 0;
 
     using Subscribe = std::tuple<coro<Message>, Unsub>;
-    [[nodiscard]] virtual awaitable<Subscribe> subscribe(std::string_view subject) = 0;
+    [[nodiscard]] virtual awaitable<Subscribe> subscribe(any_io_executor executor,
+                                                         std::string_view subject) = 0;
 
     [[nodiscard]] virtual awaitable<void> shutdown() = 0;
 
