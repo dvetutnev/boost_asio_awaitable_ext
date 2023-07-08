@@ -174,15 +174,15 @@ struct Unsub::Impl
 {
     auto push() -> awaitable<void>
     {
-        bool isFirst = !std::exchange(_pushed, true);
-        if (isFirst) {
-            co_await _txQueue.push(std::move(_msg));
+        auto msg = std::exchange(_msg, std::nullopt);
+        if (msg) {
+            co_await _txQueue.push(std::move(*msg));
         }
     }
 
     ~Impl()
     {
-        if (_pushed) {
+        if (!_msg) {
             return;
         }
         try {
@@ -191,17 +191,15 @@ struct Unsub::Impl
                 co_await queue.push(std::move(msg));
             };
             co_spawn(_executor,
-                     push(_txQueue, std::move(_msg)),
+                     push(_txQueue, std::move(*_msg)),
                      detached);
         }
         catch (...) {}
     }
 
-    TXMessage _msg;
+    std::optional<TXMessage> _msg;
     TXQueueTail& _txQueue;
     any_io_executor _executor;
-
-    bool _pushed = false;
 };
 
 awaitable<void> Unsub::operator()()

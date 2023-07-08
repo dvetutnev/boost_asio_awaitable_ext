@@ -20,5 +20,4 @@ auto subscription(any_io_executor executor, SubQueueHead queue) -> coro<Message>
     } while (!end);
 }
 
-
 } // namespace nats_coro
