@@ -8,8 +8,8 @@
 #include <boost/asio/write.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/streambuf.hpp>
-#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/experimental/use_coro.hpp>
+#include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/detached.hpp>
 
 #include <boost/noncopyable.hpp>
@@ -17,13 +17,9 @@
 #include <format>
 #include <optional>
 #include <map>
-#include <iterator>
-
-#include <iostream> // tmp
 
 namespace nats_coro {
 
-using namespace experimental::awaitable_operators;
 using experimental::use_coro;
 using experimental::make_parallel_group;
 using experimental::wait_for_one;
@@ -222,7 +218,17 @@ awaitable<void> Client::run()
     if (!_socket.is_open()) {
         throw boost::system::system_error{error::operation_aborted};
     }
-    auto executor = _socket.get_executor();
+
+    auto cs = co_await this_coro::cancellation_state;
+    auto slot = cs.slot();
+    if (slot.is_connected()) {
+        slot.assign([this](cancellation_type)
+        {
+            co_spawn(_socket.get_executor(),
+                     shutdown(),
+                     detached);
+        });
+    }
 
     auto rxWrap = [this]() -> awaitable<void>
     {
@@ -230,7 +236,8 @@ awaitable<void> Client::run()
         auto [order, rxEx, shutdownEc] = co_await make_parallel_group(
             co_spawn(executor, rx(), deferred),
             _shutdownEvent.wait(deferred))
-                                             .async_wait(wait_for_one(), deferred);
+            .async_wait(wait_for_one(),
+                        deferred);
 
         if (order[0] == 0) {
             assert(!!rxEx); // rx() first only with net error
@@ -238,11 +245,14 @@ awaitable<void> Client::run()
         }
     };
 
+    auto executor = _socket.get_executor();
     auto [order, rxEx, txEx] = co_await make_parallel_group(
         co_spawn(executor, rxWrap(), deferred),
-                                   co_spawn(executor, tx(std::move(*_txQueueHead)), deferred))
-                                   .async_wait(wait_for_one_error(), deferred);
-
+        co_spawn(executor, tx(std::move(*_txQueueHead)), deferred))
+        .async_wait(wait_for_one_error(),
+                    bind_cancellation_slot(
+                        cancellation_slot(),
+                        use_awaitable));
     {
         boost::system::error_code dummy;
         _socket.shutdown(ip::tcp::socket::shutdown_both, dummy);

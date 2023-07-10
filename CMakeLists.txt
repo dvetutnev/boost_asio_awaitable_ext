@@ -18,13 +18,13 @@ if(ASIO_HANDLER_TRACKING)
 endif()
 
 find_package(Boost REQUIRED COMPONENTS json url unit_test_framework)
+find_package(OpenSSL REQUIRED)
 
 add_library(
   ${PROJECT_NAME} src/nats_coro.cpp src/queue.cpp src/connect_to_nats.cpp
                   src/subscribe.cpp src/message.cpp)
 target_include_directories(${PROJECT_NAME} PUBLIC include)
-target_link_libraries(${PROJECT_NAME} PUBLIC Boost::boost Boost::json
-                                             Boost::url)
+target_link_libraries(${PROJECT_NAME} PUBLIC Boost::json Boost::url)
 
 if(TSAN_TESTS)
   add_library(disruptorplus INTERFACE)
