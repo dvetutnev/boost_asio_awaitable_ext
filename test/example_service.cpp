@@ -1,8 +1,11 @@
 #include "nats_coro.h"
+#include "event.h"
 
 #include <boost/mysql.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
+
+#include <boost/noncopyable.hpp>
 
 #include <iostream>
 
@@ -14,6 +17,41 @@ constexpr auto mysqlUser = "root"sv;
 constexpr auto mysqlPassword = "password"sv;
 
 constexpr auto use_awaitable_nothrow = boost::asio::as_tuple(boost::asio::use_awaitable);
+
+struct TaskCounter : boost::noncopyable
+{
+    struct Task : boost::noncopyable
+    {
+        explicit Task(TaskCounter& counter) : _counter{&counter} { _counter->increment(); }
+        ~Task() { if (_counter) _counter->decrement(); }
+
+        Task(Task&& other) { _counter = std::exchange(other._counter, nullptr); }
+        Task& operator=(Task&& other) { _counter = std::exchange(other._counter, nullptr); return *this; }
+
+    private:
+        TaskCounter* _counter;
+    };
+
+    boost::asio::awaitable<void> wait_all_completion() {
+        if (_count.load(std::memory_order_acquire)) {
+            co_await _event.wait(boost::asio::use_awaitable);
+        }
+    }
+
+    Task make_task() { return Task{*this}; }
+
+private:
+    void increment() { _count.fetch_add(1, std::memory_order_relaxed); }
+    void decrement() {
+        auto prev = _count.fetch_sub(1, std::memory_order_acquire);
+        if (prev == 1) { // last task
+            _event.set();
+        }
+    }
+
+    std::atomic_size_t _count = 0;
+    boost::asio::awaitable_ext::Event _event;
+};
 
 auto connect2mysql() -> boost::asio::awaitable<boost::mysql::tcp_connection>
 {
@@ -43,6 +81,8 @@ auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
     auto mqClient = co_await nats_coro::createClient(natsUrl);
     auto dbClient = co_await connect2mysql();
 
+    auto taskCounter = TaskCounter();
+
     auto process = [&](nats_coro::Message msg) -> boost::asio::awaitable<void>
     {
         auto query = msg.payload();
@@ -61,7 +101,9 @@ auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
     };
 
     using Handler = std::function<boost::asio::awaitable<void>(nats_coro::Message)>;
-    auto wrapper = [&](nats_coro::Message msg, Handler handler) -> boost::asio::awaitable<void>
+    auto wrapper = [&](nats_coro::Message msg,
+                       Handler handler,
+                       TaskCounter::Task task) -> boost::asio::awaitable<void>
     {
         auto executor = co_await boost::asio::this_coro::executor;
         auto replyTo = std::string(msg.head().reply_to());
@@ -71,10 +113,12 @@ auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
         }
         catch (const std::exception& ex) {
             co_spawn(executor,
-                [&](std::string replyTo, std::string err) -> boost::asio::awaitable<void>
+                [&](std::string replyTo,
+                    std::string err,
+                    TaskCounter::Task) -> boost::asio::awaitable<void>
                 {
                     co_await mqClient->publish(replyTo, err);
-                }(std::move(replyTo), ex.what()),
+                } (std::move(replyTo), ex.what(), std::move(task)),
                 [](std::exception_ptr ex)
                 {
                     if (ex) std::rethrow_exception(ex);
@@ -82,14 +126,18 @@ auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
         }
     };
 
-    auto accept = [&](std::string_view subject, Handler handler) -> boost::asio::awaitable<void>
+    auto accept = [&](std::string_view subject,
+                      Handler handler,
+                      TaskCounter::Task) -> boost::asio::awaitable<void>
     {
         auto executor = co_await boost::asio::this_coro::executor;
         auto [sub, unsub] = co_await mqClient->subscribe(executor, subject);
         while (auto msg = co_await sub.async_resume(boost::asio::use_awaitable))
         {
             co_spawn(executor,
-                     wrapper(std::move(*msg), handler),
+                     wrapper(std::move(*msg),
+                             handler,
+                             taskCounter.make_task()),
                      [](std::exception_ptr ex)
                      {
                          try { if (ex) std::rethrow_exception(ex); }
@@ -102,7 +150,9 @@ auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
 
     auto executor = co_await boost::asio::this_coro::executor;
     co_spawn(executor,
-             accept(subject, process),
+             accept(subject,
+                    process,
+                    taskCounter.make_task()),
              [](std::exception_ptr ex)
              {
                  try { if (ex) std::rethrow_exception(ex); }
@@ -116,6 +166,8 @@ auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
         signal.async_wait(boost::asio::deferred))
         .async_wait(boost::asio::experimental::wait_for_one(),
                     boost::asio::use_awaitable);
+
+    co_await taskCounter.wait_all_completion();
 
     if (order[0] == 0 && ex) {
         std::rethrow_exception(ex);
