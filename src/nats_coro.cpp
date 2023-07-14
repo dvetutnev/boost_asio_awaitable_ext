@@ -39,7 +39,9 @@ struct TXMessage
 using TXQueueHead = std::decay_t<decltype(std::get<0>(make_queue_mp<TXMessage>(0)))>;
 using TXQueueTail = std::decay_t<decltype(std::get<1>(make_queue_mp<TXMessage>(0)))>;
 
-class Client : public IClient, boost::noncopyable
+class Client : public IClient,
+               public std::enable_shared_from_this<Client>,
+               boost::noncopyable
 {
 public:
     Client(ip::tcp::socket&& socket);
@@ -222,10 +224,14 @@ awaitable<void> Client::run()
     auto cs = co_await this_coro::cancellation_state;
     auto slot = cs.slot();
     if (slot.is_connected()) {
-        slot.assign([this](cancellation_type)
+        slot.assign([self = shared_from_this()](cancellation_type)
         {
-            co_spawn(_socket.get_executor(),
-                     shutdown(),
+            auto executor = self->_socket.get_executor();
+            auto doShutdown = [](std::shared_ptr<IClient> self) -> awaitable<void> {
+                co_await self->shutdown();
+            };
+            co_spawn(executor,
+                     doShutdown(std::move(self)),
                      detached);
         });
     }
