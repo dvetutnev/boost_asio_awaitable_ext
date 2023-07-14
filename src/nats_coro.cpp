@@ -80,6 +80,7 @@ private:
     TXMessage make_unsub_tx_message(std::string subId);
     Unsub make_unsub(TXMessage&&);
     TXMessage make_shutdown_tx_message();
+    any_io_executor get_executor() { return _socket.get_executor(); }
 };
 
 awaitable<std::shared_ptr<IClient>> createClient(std::string_view url) {
@@ -211,7 +212,7 @@ Unsub Client::make_unsub(TXMessage&& txMsg)
 {
     auto impl = std::make_shared<Unsub::Impl>(std::move(txMsg),
                                               *_txQueueTail,
-                                              _socket.get_executor());
+                                              get_executor());
     return Unsub{std::move(impl)};
 }
 
@@ -226,7 +227,7 @@ awaitable<void> Client::run()
     if (slot.is_connected()) {
         slot.assign([self = shared_from_this()](cancellation_type)
         {
-            auto executor = self->_socket.get_executor();
+            auto executor = self->get_executor();
             auto doShutdown = [](std::shared_ptr<IClient> self) -> awaitable<void> {
                 co_await self->shutdown();
             };
@@ -251,10 +252,9 @@ awaitable<void> Client::run()
         }
     };
 
-    auto executor = _socket.get_executor();
     auto [order, rxEx, txEx] = co_await make_parallel_group(
-        co_spawn(executor, rxWrap(), deferred),
-        co_spawn(executor, tx(std::move(*_txQueueHead)), deferred))
+        co_spawn(get_executor(), rxWrap(), deferred),
+        co_spawn(get_executor(), tx(std::move(*_txQueueHead)), deferred))
         .async_wait(wait_for_one_error(),
                     bind_cancellation_slot(
                         cancellation_slot(),
