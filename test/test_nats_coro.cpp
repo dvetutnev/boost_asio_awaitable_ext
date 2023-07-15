@@ -14,6 +14,7 @@
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/experimental/coro.hpp>
 #include <boost/asio/experimental/use_coro.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
@@ -910,6 +911,45 @@ BOOST_AUTO_TEST_CASE(disable_repeat_run)
         BOOST_CHECK_THROW(co_await client->run(),
                           boost::system::system_error);
         BOOST_CHECK_THROW(co_await client->run(),
+                          boost::system::system_error);
+    };
+
+    auto ioContext = io_context();
+    co_spawn(ioContext, server(), rethrow_handler);
+    co_spawn(ioContext, client(), rethrow_handler);
+    ioContext.run();
+}
+
+BOOST_AUTO_TEST_CASE(alive_sub)
+{
+    Event start;
+    auto server = [&]() -> awaitable<void>
+    {
+        auto socket = co_await mock_nats(mockUrl);
+        co_await start.wait(use_awaitable);
+        co_await async_write(socket, "PING\r\n"_buf, use_awaitable);
+        socket.close();
+    };
+
+    auto client = [&]() -> awaitable<void>
+    {
+        auto client = co_await createClient(mockUrl);
+        auto executor = co_await this_coro::executor;
+        auto [sub, unsub] = co_await client->subscribe(executor, "42");
+        start.set();
+        // Client set its shared_ptr in cancellation slot, run with empty
+        BOOST_CHECK_THROW(co_await co_spawn(executor,
+                                            client->run(),
+                                            bind_cancellation_slot(
+                                                cancellation_slot(),
+                                                use_awaitable)),
+                          boost::system::system_error);
+        client.reset();
+        // Force memory rewrite
+        try { co_await createClient(mockUrl); } catch (const boost::system::system_error&) {}
+        auto msg = co_await sub.async_resume(use_awaitable);
+        BOOST_TEST(!msg);
+        BOOST_CHECK_THROW(co_await unsub(),
                           boost::system::system_error);
     };
 
