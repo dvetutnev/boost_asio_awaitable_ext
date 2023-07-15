@@ -53,7 +53,8 @@ private:
     boost::asio::awaitable_ext::Event _event;
 };
 
-auto connect2mysql() -> boost::asio::awaitable<boost::mysql::tcp_connection>
+auto connect2mysql(boost::asio::ssl::context& sslContext)
+    -> boost::asio::awaitable<std::shared_ptr<boost::mysql::tcp_ssl_connection>>
 {
     auto executor = co_await boost::asio::this_coro::executor;
 
@@ -67,19 +68,20 @@ auto connect2mysql() -> boost::asio::awaitable<boost::mysql::tcp_connection>
     boost::system::error_code ec;
     boost::mysql::diagnostics diag;
 
-    auto conn = boost::mysql::tcp_connection(executor);
-    std::tie(ec) = co_await conn.async_connect(*endpoints.begin(),
-                                               params,
-                                               diag,
-                                               use_awaitable_nothrow);
+    auto conn = std::make_shared<boost::mysql::tcp_ssl_connection>(executor, sslContext);
+    std::tie(ec) = co_await conn->async_connect(*endpoints.begin(),
+                                                params,
+                                                diag,
+                                                use_awaitable_nothrow);
     boost::mysql::throw_on_error(ec, diag);
     co_return conn;
 }
 
-auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
+auto async_main(std::string_view subject,
+                boost::asio::ssl::context& sslContext) -> boost::asio::awaitable<void>
 {
     auto mqClient = co_await nats_coro::createClient(natsUrl);
-    auto dbClient = co_await connect2mysql();
+    auto dbClient = co_await connect2mysql(sslContext);
 
     auto taskCounter = TaskCounter();
 
@@ -92,10 +94,10 @@ auto async_main(std::string_view subject) -> boost::asio::awaitable<void>
         boost::mysql::diagnostics diag;
         boost::mysql::results result;
 
-        std::tie(ec) = co_await dbClient.async_query(query,
-                                                     result,
-                                                     diag,
-                                                     use_awaitable_nothrow);
+        std::tie(ec) = co_await dbClient->async_query(query,
+                                                      result,
+                                                      diag,
+                                                      use_awaitable_nothrow);
         boost::mysql::throw_on_error(ec, diag);
         co_await mqClient->publish(replyTo, result.rows()[0].at(0).as_string());
     };
@@ -183,7 +185,8 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     auto ioContext = boost::asio::io_context();
-    boost::asio::co_spawn(ioContext, async_main(argv[1]),
+    auto sslContext = boost::asio::ssl::context(boost::asio::ssl::context::tls_client);
+    boost::asio::co_spawn(ioContext, async_main(argv[1], sslContext),
                           [](std::exception_ptr ex){ if (ex) std::rethrow_exception(ex); });
     ioContext.run();
     return EXIT_SUCCESS;

@@ -26,9 +26,13 @@ if(TSAN_TESTS)
   add_subdirectory(tsan)
 endif()
 
+add_executable(wait_signal wait_signal.cpp)
+target_link_libraries(wait_signal Boost::headers)
+
 add_executable(example_service example_service.cpp)
 target_link_libraries(example_service ${PROJECT_NAME} OpenSSL::Crypto
                       OpenSSL::SSL)
 
-add_executable(wait_signal wait_signal.cpp)
-target_link_libraries(example_service Boost::headers)
+add_executable(example_service2 example_service2.cpp)
+target_link_libraries(example_service2 ${PROJECT_NAME} OpenSSL::Crypto
+                      OpenSSL::SSL)
