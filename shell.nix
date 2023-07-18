@@ -11,7 +11,6 @@ in
     name = "developEnv";
     packages = [
       gdb
-      cmake-format
     ];
     hardeningDisable = [ "all" ];
     inputsFrom = [
