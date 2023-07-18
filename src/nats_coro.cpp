@@ -159,7 +159,8 @@ TXMessage Client::make_unsub_tx_message(std::string subId)
             {
                 try {
                     assert(_subscribes.contains(subId));
-                    SubQueueTail& queue = _subscribes.find(subId)->second;
+                    auto node = _subscribes.extract(subId);
+                    SubQueueTail& queue = node.mapped();
                     co_await queue.push(Message{}); // push EOF
                 } catch (const boost::system::system_error& ex) {
                     // queue back maybe destroyed
