@@ -181,16 +181,17 @@ struct Unsub::Impl
         }
     }
 
+    auto push(std::move_only_function<awaitable<void>()> doUnsub) -> awaitable<void>
+    {
+        co_await doUnsub();
+    }
+
     ~Impl()
     {
         if (!_doUnsub) {
             return;
         }
         try {
-            auto push = [](std::move_only_function<awaitable<void>()> doUnsub) -> awaitable<void>
-            {
-                co_await doUnsub();
-            };
             co_spawn(_executor,
                      push(std::move(_doUnsub)),
                      detached);
