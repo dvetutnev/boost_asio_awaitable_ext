@@ -106,8 +106,7 @@ awaitable<TSequence> SequenceBarrier<TSequence, Traits, Awaiter>::wait_until_pub
     }
 
     auto cs = co_await this_coro::cancellation_state;
-    auto slot = cs.slot();
-    if (slot.is_connected()) {
+    if (auto slot = cs.slot(); slot.is_connected()) {
         slot.assign([this](cancellation_type){ const_cast<SequenceBarrier*>(this)->close(); });
     }
 

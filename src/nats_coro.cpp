@@ -228,8 +228,7 @@ awaitable<void> Client::run()
     }
 
     auto cs = co_await this_coro::cancellation_state;
-    auto slot = cs.slot();
-    if (slot.is_connected()) {
+    if (auto slot = cs.slot(); slot.is_connected()) {
         slot.assign([self = shared_from_this()](cancellation_type)
         {
             auto executor = self->get_executor();

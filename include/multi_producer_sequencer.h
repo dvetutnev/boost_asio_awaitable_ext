@@ -192,8 +192,7 @@ awaitable<TSequence> MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, 
                                                                                                                TSequence lastKnownPublished) const
 {
     auto cs = co_await this_coro::cancellation_state;
-    auto slot = cs.slot();
-    if (slot.is_connected()) {
+    if (auto slot = cs.slot(); slot.is_connected()) {
         slot.assign([this](cancellation_type){ const_cast<MultiProducerSequencer*>(this)->close(); });
     }
 
@@ -225,8 +224,7 @@ template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TS
 awaitable<TSequence> MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::claim_one()
 {
     auto cs = co_await this_coro::cancellation_state;
-    auto slot = cs.slot();
-    if (slot.is_connected()) {
+    if (auto slot = cs.slot(); slot.is_connected()) {
         slot.assign([this](cancellation_type){ this->close(); });
     }
 
@@ -248,8 +246,7 @@ template<std::unsigned_integral TSequence, typename Traits, IsSequenceBarrier<TS
 awaitable<SequenceRange<TSequence, Traits>> MultiProducerSequencer<TSequence, Traits, ConsumerBarrier, Awaiter>::claim_up_to(std::size_t count)
 {
     auto cs = co_await this_coro::cancellation_state;
-    auto slot = cs.slot();
-    if (slot.is_connected()) {
+    if (auto slot = cs.slot(); slot.is_connected()) {
         slot.assign([this](cancellation_type){ this->close(); });
     }
 
