@@ -37,3 +37,4 @@
 # IDEs
 CMakeLists.txt.user
 CMakeUserPresets.json
+*.swp
